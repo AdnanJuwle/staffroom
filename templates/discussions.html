@@ -1,0 +1,213 @@
+{% extends "common/base.html" %}
+
+{% block title %}Discussions{% endblock %}
+
+{% block extra_styles %}
+        .discussion-card {
+            border-left: 4px solid #17a2b8;
+        }
+        .global-discussion-card {
+            border-left: 4px solid #28a745;
+        }
+        .pinned-discussion {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border-left-color: #ffc107;
+        }
+        .attachment-preview {
+            max-width: 100px;
+            max-height: 100px;
+            border-radius: 8px;
+        }
+        .switch-btn {
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .switch-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .switch-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+        .switch-btn:hover::before {
+            left: 100%;
+        }
+        .breadcrumb {
+            background-color: rgba(0,0,0,0.05);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+        }
+{% endblock %}
+
+{% block content %}
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <h1><i class="fas fa-building me-2 text-primary"></i>Organization Discussions</h1>
+                <p class="text-muted">Connect with teachers in your organization and share ideas</p>
+            </div>
+            <div class="col-md-6">
+                <div class="d-flex justify-content-end align-items-center gap-3">
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newDiscussionModal">
+                            <i class="fas fa-plus me-2"></i>New Discussion
+                        </button>
+                    </div>
+                    <div class="vr"></div>
+                    <a href="{{ url_for('global_discussions') }}" class="btn btn-outline-success btn-lg switch-btn">
+                        <i class="fas fa-globe me-2"></i>Switch to Global Network
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Breadcrumb -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{{ url_for('dashboard') }}" class="text-decoration-none">
+                                <i class="fas fa-home me-1"></i>Dashboard
+                            </a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">
+                            <i class="fas fa-building me-1"></i>Organization Discussions
+                        </li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Organization Discussions List -->
+        <div class="row">
+            <div class="col-12">
+                {% if discussions %}
+                    {% for discussion in discussions %}
+                    <div class="card discussion-card mb-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="card-title mb-0">{{ discussion.title }}</h5>
+                                <small class="text-muted">{{ discussion.created_at[:16] }}</small>
+                            </div>
+                            <p class="card-text">{{ discussion.content[:200] }}{% if discussion.content|length > 200 %}...{% endif %}</p>
+                            
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <small class="text-muted">
+                                        <i class="fas fa-user me-1"></i>{{ discussion.author_name }}
+                                        <i class="fas fa-comments me-1 ms-3"></i>{{ discussion.reply_count or 0 }} replies
+                                    </small>
+                                </div>
+                                <button class="btn btn-outline-primary btn-sm" onclick="viewDiscussion({{ discussion.id }})">
+                                    <i class="fas fa-eye me-1"></i>View Discussion
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="card">
+                        <div class="card-body text-center py-5">
+                            <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No organization discussions yet</h5>
+                            <p class="text-muted">Start the first discussion in your organization!</p>
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newDiscussionModal">
+                                <i class="fas fa-plus me-2"></i>Start Discussion
+                            </button>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- New Discussion Modal -->
+        <div class="modal fade" id="newDiscussionModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Start New Discussion</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="newDiscussionForm" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="discussionTitle" class="form-label">Title *</label>
+                                <input type="text" class="form-control" id="discussionTitle" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="discussionContent" class="form-label">Content *</label>
+                                <textarea class="form-control" id="discussionContent" rows="5" required></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="discussionFiles" class="form-label">Attachments (Optional)</label>
+                                <input type="file" class="form-control" id="discussionFiles" multiple accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif">
+                                <div class="form-text">Supported formats: PDF, DOC, DOCX, TXT, PNG, JPG, JPEG, GIF (Max 16MB each)</div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="createDiscussionBtn">
+                            <i class="fas fa-plus me-2"></i>Start Discussion
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Create new discussion
+    document.getElementById('createDiscussionBtn').addEventListener('click', function() {
+        const title = document.getElementById('discussionTitle').value;
+        const content = document.getElementById('discussionContent').value;
+        const files = document.getElementById('discussionFiles').files;
+
+        if (!title || !content) {
+            alert('Please fill in all required fields');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('content', content);
+        
+        for (let i = 0; i < files.length; i++) {
+            formData.append('files', files[i]);
+        }
+
+        fetch('/api/create_discussion', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Discussion created successfully!');
+                location.reload();
+            } else {
+                alert('Failed to create discussion: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred');
+        });
+    });
+
+    function viewDiscussion(discussionId) {
+        // TODO: Implement discussion details view
+        alert('View discussion details for ID: ' + discussionId);
+    }
+</script>
+{% endblock %}

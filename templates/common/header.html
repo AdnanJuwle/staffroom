@@ -1,0 +1,40 @@
+<!-- Common Navigation Header for Dashboard Pages -->
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <i class="fas fa-graduation-cap me-2"></i>StaffRoom
+        </a>
+        <div class="navbar-nav ms-auto">
+            <span class="navbar-text me-3">
+                Welcome, {{ session.first_name }} {{ session.last_name }} ({{ session.user_type.title() }})
+                {% if session.current_org_id %}
+                <br><small>Organization: {{ session.current_org_name or 'Unknown' }}</small>
+                {% endif %}
+            </span>
+            <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-home me-1"></i>Dashboard
+            </a>
+            <a class="nav-link {% if request.endpoint == 'classes' %}active{% endif %}" href="{{ url_for('classes') }}">
+                <i class="fas fa-chalkboard me-1"></i>Classes
+            </a>
+            <a class="nav-link {% if request.endpoint == 'students' %}active{% endif %}" href="{{ url_for('students') }}">
+                <i class="fas fa-users me-1"></i>Students
+            </a>
+            <a class="nav-link {% if request.endpoint == 'resources' %}active{% endif %}" href="{{ url_for('resources') }}">
+                <i class="fas fa-folder me-1"></i>Resources
+            </a>
+            <a class="nav-link {% if request.endpoint == 'schedule' %}active{% endif %}" href="{{ url_for('schedule') }}">
+                <i class="fas fa-calendar me-1"></i>Schedule
+            </a>
+            <a class="nav-link {% if request.endpoint == 'discussions' or request.endpoint == 'global_discussions' %}active{% endif %}" href="{{ url_for('discussions') }}">
+                <i class="fas fa-comments me-1"></i>Discussions
+            </a>
+            <a class="nav-link {% if request.endpoint == 'organizations' %}active{% endif %}" href="{{ url_for('organizations') }}">
+                <i class="fas fa-building me-1"></i>Organizations
+            </a>
+            <a class="nav-link" href="{{ url_for('logout') }}">
+                <i class="fas fa-sign-out-alt me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>

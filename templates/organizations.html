@@ -1,0 +1,274 @@
+{% extends "common/base.html" %}
+
+{% block title %}Organizations{% endblock %}
+
+{% block extra_styles %}
+        .organization-card {
+            margin-bottom: 1.5rem;
+        }
+        .organization-logo {
+            width: 60px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+        .privacy-badge {
+            font-size: 0.8rem;
+        }
+{% endblock %}
+
+{% block content %}
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h1><i class="fas fa-building me-2"></i>Organizations</h1>
+                <p class="text-muted">Join an organization to collaborate with other teachers and access private discussions. <strong>Note:</strong> You can only be a member of one organization at a time.</p>
+            </div>
+            <div class="col-md-4 text-end">
+                {% if can_create_org %}
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newOrganizationModal">
+                    <i class="fas fa-plus me-2"></i>Create Organization
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- My Organizations -->
+        {% if user_organizations %}
+        <div class="row mb-4">
+            <div class="col-12">
+                <h4><i class="fas fa-users me-2"></i>My Organizations</h4>
+                <div class="row">
+                    {% for org in user_organizations %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card organization-card">
+                            <div class="card-body">
+                                <div class="d-flex align-items-start">
+                                    {% if org.logo_filename %}
+                                    <img src="/download/{{ org.logo_filename }}" class="organization-logo me-3" alt="Logo">
+                                    {% else %}
+                                    <div class="organization-logo me-3 bg-light d-flex align-items-center justify-content-center">
+                                        <i class="fas fa-building fa-2x text-muted"></i>
+                                    </div>
+                                    {% endif %}
+                                    <div class="flex-grow-1">
+                                        <h6 class="card-title mb-1">{{ org.name }}</h6>
+                                        <p class="card-text small text-muted mb-2">{{ org.description[:100] }}{% if org.description|length > 100 %}...{% endif %}</p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="badge bg-secondary privacy-badge">{{ org.role.title() }}</span>
+                                            <a href="{{ url_for('organization_detail', org_id=org.id) }}" class="btn btn-sm btn-outline-primary">
+                                                View Details
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- All Organizations -->
+        <div class="row">
+            <div class="col-12">
+                <h4><i class="fas fa-globe me-2"></i>All Organizations</h4>
+                {% if organizations %}
+                    <div class="row">
+                        {% for org in organizations %}
+                        <div class="col-md-6 col-lg-4 mb-3">
+                            <div class="card organization-card">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-start">
+                                        {% if org.logo_filename %}
+                                        <img src="/download/{{ org.logo_filename }}" class="organization-logo me-3" alt="Logo">
+                                        {% else %}
+                                        <div class="organization-logo me-3 bg-light d-flex align-items-center justify-content-center">
+                                            <i class="fas fa-building fa-2x text-muted"></i>
+                                        </div>
+                                        {% endif %}
+                                        <div class="flex-grow-1">
+                                            <h6 class="card-title mb-1">{{ org.name }}</h6>
+                                            <p class="card-text small text-muted mb-2">{{ org.description[:100] }}{% if org.description|length > 100 %}...{% endif %}</p>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <span class="badge bg-info privacy-badge me-1">
+                                                        <i class="fas fa-{% if org.discussion_privacy == 'public' %}globe{% else %}lock{% endif %} me-1"></i>
+                                                        {{ org.discussion_privacy.title() }}
+                                                    </span>
+                                                    <span class="badge bg-secondary privacy-badge">{{ org.location or 'Online' }}</span>
+                                                </div>
+                                                <a href="{{ url_for('organization_detail', org_id=org.id) }}" class="btn btn-sm btn-outline-primary">
+                                                    View Details
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="card">
+                        <div class="card-body text-center py-5">
+                            <i class="fas fa-building fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No organizations yet</h5>
+                            <p class="text-muted">{% if can_create_org %}Create the first organization to get started!{% else %}Organizations will appear here when they are created.{% endif %}</p>
+                            {% if can_create_org %}
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newOrganizationModal">
+                                <i class="fas fa-plus me-2"></i>Create Organization
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- New Organization Modal (Teachers Only) -->
+        {% if can_create_org %}
+        <div class="modal fade" id="newOrganizationModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Create New Organization</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="newOrganizationForm" enctype="multipart/form-data">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="orgName" class="form-label">Organization Name *</label>
+                                        <input type="text" class="form-control" id="orgName" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgDescription" class="form-label">Description</label>
+                                        <textarea class="form-control" id="orgDescription" rows="3"></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgLocation" class="form-label">Location</label>
+                                        <input type="text" class="form-control" id="orgLocation" placeholder="City, Country">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgLogo" class="form-label">Logo</label>
+                                        <input type="file" class="form-control" id="orgLogo" accept="image/*">
+                                        <div class="form-text">Upload a logo for your organization (PNG, JPG, GIF)</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="orgAbout" class="form-label">About</label>
+                                        <textarea class="form-control" id="orgAbout" rows="4" placeholder="Tell us about your organization..."></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgEmail" class="form-label">Contact Email</label>
+                                        <input type="email" class="form-control" id="orgEmail">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgPhone" class="form-label">Contact Phone</label>
+                                        <input type="tel" class="form-control" id="orgPhone">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="orgWebsite" class="form-label">Website</label>
+                                        <input type="url" class="form-control" id="orgWebsite" placeholder="https://example.com">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="orgPublic" checked>
+                                            <label class="form-check-label" for="orgPublic">
+                                                Public Organization
+                                            </label>
+                                        </div>
+                                        <div class="form-text">Public organizations are visible to all users</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="orgPrivacy" class="form-label">Discussion Privacy</label>
+                                        <select class="form-select" id="orgPrivacy">
+                                            <option value="public">Public Discussions</option>
+                                            <option value="private">Private Discussions</option>
+                                        </select>
+                                        <div class="form-text">Control who can see organization discussions</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="createOrganizationBtn">
+                            <i class="fas fa-plus me-2"></i>Create Organization
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    {% if can_create_org %}
+    // Create new organization
+    document.getElementById('createOrganizationBtn').addEventListener('click', function() {
+        const name = document.getElementById('orgName').value;
+        const description = document.getElementById('orgDescription').value;
+        const about = document.getElementById('orgAbout').value;
+        const location = document.getElementById('orgLocation').value;
+        const email = document.getElementById('orgEmail').value;
+        const phone = document.getElementById('orgPhone').value;
+        const website = document.getElementById('orgWebsite').value;
+        const isPublic = document.getElementById('orgPublic').checked;
+        const privacy = document.getElementById('orgPrivacy').value;
+        const logo = document.getElementById('orgLogo').files[0];
+
+        if (!name) {
+            alert('Organization name is required');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('description', description);
+        formData.append('about', about);
+        formData.append('location', location);
+        formData.append('contact_email', email);
+        formData.append('contact_phone', phone);
+        formData.append('website', website);
+        formData.append('is_public', isPublic);
+        formData.append('discussion_privacy', privacy);
+        
+        if (logo) {
+            formData.append('logo', logo);
+        }
+
+        fetch('/api/create_organization', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Organization created successfully!');
+                location.reload();
+            } else {
+                alert('Failed to create organization: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred');
+        });
+    });
+    {% endif %}
+</script>
+{% endblock %}

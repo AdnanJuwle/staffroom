@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeacherApp - {{ organization.name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.5rem;
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+        }
+        .organization-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        .organization-logo {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 15px;
+            border: 4px solid rgba(255, 255, 255, 0.2);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+        .member-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .contact-info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-graduation-cap me-2"></i>TeacherApp
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">
+                    Welcome, {{ session.first_name }} {{ session.last_name }} ({{ session.user_type.title() }})
+                </span>
+                <a class="nav-link" href="{{ url_for('organizations') }}">
+                    <i class="fas fa-building me-1"></i>Organizations
+                </a>
+                <a class="nav-link" href="{{ url_for('logout') }}">
+                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Organization Header -->
+        <div class="organization-header">
+            <div class="row align-items-center">
+                <div class="col-md-3 text-center">
+                    {% if organization.logo_filename %}
+                    <img src="/download/{{ organization.logo_filename }}" class="organization-logo" alt="Logo">
+                    {% else %}
+                    <div class="organization-logo d-flex align-items-center justify-content-center">
+                        <i class="fas fa-building fa-3x"></i>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    <h1 class="mb-2">{{ organization.name }}</h1>
+                    <p class="mb-3">{{ organization.description or 'No description available' }}</p>
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-light text-dark me-2">
+                            <i class="fas fa-{% if organization.discussion_privacy == 'public' %}globe{% else %}lock{% endif %} me-1"></i>
+                            {{ organization.discussion_privacy.title() }} Discussions
+                        </span>
+                        <span class="badge bg-light text-dark me-2">
+                            <i class="fas fa-users me-1"></i>
+                            {{ members|length }} Members
+                        </span>
+                        {% if organization.location %}
+                        <span class="badge bg-light text-dark">
+                            <i class="fas fa-map-marker-alt me-1"></i>
+                            {{ organization.location }}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="col-md-3 text-end">
+                    {% if not user_membership %}
+                    <button class="btn btn-light btn-lg" id="joinOrgBtn">
+                        <i class="fas fa-user-plus me-2"></i>Join Organization
+                    </button>
+                    {% else %}
+                    <div class="text-center">
+                        <span class="badge bg-success fs-6 mb-2">{{ user_membership.role.title() }}</span>
+                        <br>
+                        {% if user_membership.joined_at %}
+                        <small>Member since {{ user_membership.joined_at[:10] }}</small>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- About Section -->
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-info-circle me-2"></i>About {{ organization.name }}
+                        </h5>
+                        <p class="card-text">{{ organization.about or 'No additional information available.' }}</p>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                {% if organization.contact_email or organization.contact_phone or organization.website %}
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-address-book me-2"></i>Contact Information
+                        </h5>
+                        <div class="row">
+                            {% if organization.contact_email %}
+                            <div class="col-md-4 mb-2">
+                                <strong><i class="fas fa-envelope me-1"></i>Email:</strong><br>
+                                <a href="mailto:{{ organization.contact_email }}">{{ organization.contact_email }}</a>
+                            </div>
+                            {% endif %}
+                            {% if organization.contact_phone %}
+                            <div class="col-md-4 mb-2">
+                                <strong><i class="fas fa-phone me-1"></i>Phone:</strong><br>
+                                <a href="tel:{{ organization.contact_phone }}">{{ organization.contact_phone }}</a>
+                            </div>
+                            {% endif %}
+                            {% if organization.website %}
+                            <div class="col-md-4 mb-2">
+                                <strong><i class="fas fa-globe me-1"></i>Website:</strong><br>
+                                <a href="{{ organization.website }}" target="_blank">{{ organization.website }}</a>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Organization Discussions -->
+                {% if user_membership %}
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-comments me-2"></i>Organization Discussions
+                        </h5>
+                        <p class="card-text">
+                            {% if organization.discussion_privacy == 'private' %}
+                            This organization has private discussions. Only members can view and participate.
+                            {% else %}
+                            This organization has public discussions. All members can view and participate.
+                            {% endif %}
+                        </p>
+                        <a href="{{ url_for('discussions') }}?org={{ organization.id }}" class="btn btn-primary">
+                            <i class="fas fa-comments me-2"></i>View Discussions
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Members Section -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-users me-2"></i>Members ({{ members|length }})
+                        </h5>
+                        {% if members %}
+                            <div class="members-list">
+                                {% for member in members %}
+                                <div class="d-flex align-items-center mb-3">
+                                    <div class="member-avatar me-3">
+                                        {{ member.first_name[0] }}{{ member.last_name[0] }}
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <div class="fw-bold">{{ member.first_name }} {{ member.last_name }}</div>
+                                        <small class="text-muted">{{ member.user_type.title() }}</small>
+                                    </div>
+                                    <span class="badge bg-secondary">{{ member.role.title() }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted">No members yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Organization Stats -->
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-chart-bar me-2"></i>Organization Stats
+                        </h5>
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <div class="fw-bold fs-4">{{ members|length }}</div>
+                                <small class="text-muted">Members</small>
+                            </div>
+                            <div class="col-6">
+                                <div class="fw-bold fs-4">{{ organization.created_at[:10] }}</div>
+                                <small class="text-muted">Created</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Join organization
+        document.getElementById('joinOrgBtn')?.addEventListener('click', function() {
+            const confirmMessage = 'Are you sure you want to join this organization? ' +
+                'Note: You can only be a member of one organization at a time. ' +
+                'If you are already in another organization, you will be switched to this one.';
+            
+            if (confirm(confirmMessage)) {
+                fetch('/api/join_organization/{{ organization.id }}', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message || 'Successfully joined the organization!');
+                        location.reload();
+                    } else {
+                        alert('Failed to join organization: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

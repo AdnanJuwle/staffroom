@@ -1,0 +1,183 @@
+{% extends "common/base.html" %}
+
+{% block title %}Student Management{% endblock %}
+
+{% block extra_styles %}
+        .student-card {
+            border-left: 4px solid #28a745;
+        }
+        .student-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+{% endblock %}
+
+{% block content %}
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h2><i class="fas fa-users me-2"></i>Student Management</h2>
+                <p class="text-muted">Manage students and enroll them in classes</p>
+            </div>
+            <div class="col-md-4 text-end">
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">
+                    <i class="fas fa-plus me-2"></i>Add Student
+                </button>
+            </div>
+        </div>
+
+        <!-- Students Grid -->
+        <div class="row">
+            {% for student in students %}
+                <div class="col-md-6 col-lg-4 mb-4">
+                    <div class="card student-card h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="student-avatar me-3">
+                                    {{ student.first_name[0] }}{{ student.last_name[0] }}
+                                </div>
+                                <div>
+                                    <h5 class="card-title mb-0">{{ student.first_name }} {{ student.last_name }}</h5>
+                                    <small class="text-muted">{{ student.email }}</small>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <small class="text-muted">Enrolled Classes:</small>
+                                <div class="fw-bold">{{ student.enrolled_classes or 0 }}</div>
+                            </div>
+                            
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-primary btn-sm" onclick="viewStudent({{ student.id }})">
+                                    <i class="fas fa-eye me-1"></i>View Details
+                                </button>
+                                <button class="btn btn-outline-success btn-sm" onclick="enrollStudent({{ student.id }})">
+                                    <i class="fas fa-user-plus me-1"></i>Enroll in Class
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body text-center py-5">
+                            <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No students yet</h5>
+                            <p class="text-muted">Add your first student to get started!</p>
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">
+                                <i class="fas fa-plus me-2"></i>Add Student
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <!-- Add Student Modal -->
+        <div class="modal fade" id="addStudentModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add New Student</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addStudentForm">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="studentFirstName" class="form-label">First Name *</label>
+                                        <input type="text" class="form-control" id="studentFirstName" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="studentLastName" class="form-label">Last Name *</label>
+                                        <input type="text" class="form-control" id="studentLastName" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="studentEmail" class="form-label">Email *</label>
+                                <input type="email" class="form-control" id="studentEmail" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="studentPhone" class="form-label">Phone</label>
+                                <input type="tel" class="form-control" id="studentPhone">
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="addStudentBtn">
+                            <i class="fas fa-plus me-2"></i>Add Student
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Add new student
+    document.getElementById('addStudentBtn').addEventListener('click', function() {
+        const firstName = document.getElementById('studentFirstName').value;
+        const lastName = document.getElementById('studentLastName').value;
+        const email = document.getElementById('studentEmail').value;
+        const phone = document.getElementById('studentPhone').value;
+
+        if (!firstName || !lastName || !email) {
+            alert('Please fill in all required fields');
+            return;
+        }
+
+        const studentData = {
+            first_name: firstName,
+            last_name: lastName,
+            email: email,
+            phone: phone
+        };
+
+        fetch('/api/create_student', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(studentData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Student added successfully!');
+                location.reload();
+            } else {
+                alert('Failed to add student: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred');
+        });
+    });
+
+    function viewStudent(studentId) {
+        // TODO: Implement student details view
+        alert('View student details for ID: ' + studentId);
+    }
+
+    function enrollStudent(studentId) {
+        // TODO: Implement student enrollment
+        alert('Enroll student ID: ' + studentId);
+    }
+</script>
+{% endblock %}

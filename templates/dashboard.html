@@ -1,0 +1,209 @@
+{% extends "common/base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_styles %}
+        .stats-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-left: 4px solid #667eea;
+        }
+        .stats-card .card-icon {
+            font-size: 2.5rem;
+            color: #667eea;
+            margin-bottom: 1rem;
+        }
+        .welcome-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+{% endblock %}
+
+{% block content %}
+        <!-- Welcome Section -->
+        <div class="welcome-section">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-2">Welcome to {{ stats.organization_name }}</h1>
+                    <p class="mb-0">Manage your classes, students, and teaching resources efficiently within your organization</p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <i class="fas fa-chalkboard-teacher fa-4x opacity-75"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats & Management -->
+        <div class="row mb-4">
+            {% if user_type == 'teacher' %}
+                <!-- Classes Management -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-book-open card-icon"></i>
+                            <h3>{{ stats.classes }}</h3>
+                            <p class="mb-3">Active Classes</p>
+                            <a href="{{ url_for('classes') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-cog me-1"></i>Manage Classes
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Students Management -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-users card-icon"></i>
+                            <h3>{{ stats.total_students }}</h3>
+                            <p class="mb-3">Total Students</p>
+                            <a href="{{ url_for('students') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-user-plus me-1"></i>Manage Students
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Subjects -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-graduation-cap card-icon"></i>
+                            <h3>{{ stats.subjects }}</h3>
+                            <p class="mb-3">Subjects</p>
+                            <a href="{{ url_for('classes') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-plus me-1"></i>Add Subject
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% elif user_type == 'admin' %}
+                <!-- Organization Members -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-users card-icon"></i>
+                            <h3>{{ stats.total_members }}</h3>
+                            <p class="mb-3">Total Members</p>
+                            <a href="{{ url_for('students') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-users me-1"></i>View Members
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Teachers -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-chalkboard-teacher card-icon"></i>
+                            <h3>{{ stats.teachers }}</h3>
+                            <p class="mb-3">Teachers</p>
+                            <a href="{{ url_for('students') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-user-tie me-1"></i>Manage Teachers
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Students -->
+                <div class="col-md-4">
+                    <div class="card stats-card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-user-graduate card-icon"></i>
+                            <h3>{{ stats.students }}</h3>
+                            <p class="mb-3">Students</p>
+                            <a href="{{ url_for('students') }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-user-plus me-1"></i>Manage Students
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Additional Stats Row -->
+        <div class="row mb-4">
+            <!-- Resources -->
+            <div class="col-md-4">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-folder card-icon"></i>
+                        <h3>{{ stats.resources or 0 }}</h3>
+                        <p class="mb-3">Resources</p>
+                        <a href="{{ url_for('resources') }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-folder-open me-1"></i>Manage Resources
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <!-- Schedule -->
+            <div class="col-md-4">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-calendar card-icon"></i>
+                        <h3>{{ stats.events or 0 }}</h3>
+                        <p class="mb-3">Upcoming Events</p>
+                        <a href="{{ url_for('schedule') }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-calendar-plus me-1"></i>View Schedule
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <!-- Discussions -->
+            <div class="col-md-4">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-comments card-icon"></i>
+                        <h3>{{ stats.discussions or 0 }}</h3>
+                        <p class="mb-3">Discussions</p>
+                        <a href="{{ url_for('discussions') }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-comment-dots me-1"></i>Join Discussions
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Subject Breakdown (Teachers Only) -->
+        {% if user_type == 'teacher' and stats.subject_breakdown %}
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-chart-pie me-2"></i>Classes by Subject
+                        </h5>
+                        <div class="row">
+                            {% for subject, count in stats.subject_breakdown.items() %}
+                            <div class="col-md-3 col-sm-6 mb-2">
+                                <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+                                    <span class="fw-bold">{{ subject }}</span>
+                                    <span class="badge bg-primary">{{ count }} class{{ 'es' if count > 1 else '' }}</span>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Additional Features -->
+        <div class="row">
+            <!-- Organization Management (Admin Only) -->
+            {% if user_type == 'admin' and stats.organization_name %}
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-cogs card-icon text-secondary"></i>
+                        <h5 class="card-title">Organization Settings</h5>
+                        <p class="card-text">Manage your organization settings and members.</p>
+                        <a href="{{ url_for('organization_detail', org_id=session.current_org_id) }}" class="btn btn-primary">
+                            <i class="fas fa-arrow-right me-2"></i>Manage Organization
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+{% endblock %}

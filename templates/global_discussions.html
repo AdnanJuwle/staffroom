@@ -1,0 +1,285 @@
+{% extends "common/base.html" %}
+
+{% block title %}Global Educator Network{% endblock %}
+
+{% block extra_css %}
+<style>
+    .global-discussion-card {
+        transition: transform 0.2s;
+        border-left: 4px solid #28a745;
+    }
+    
+    .global-discussion-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    .pinned-discussion {
+        border-left-color: #ffc107;
+        background-color: #fff9e6;
+    }
+    
+    .discussion-card {
+        transition: transform 0.2s;
+        border-radius: 8px;
+    }
+    
+    .breadcrumb {
+        background-color: rgba(0,0,0,0.05);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+    }
+    
+    .switch-btn {
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .switch-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    .switch-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s;
+    }
+    
+    .switch-btn:hover::before {
+        left: 100%;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+        <!-- Header -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <h1><i class="fas fa-globe me-2 text-success"></i>Global Educator Network</h1>
+                <p class="text-muted">Connect with educators worldwide and share ideas across organizations</p>
+            </div>
+            <div class="col-md-6">
+                <div class="d-flex justify-content-end align-items-center gap-3">
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newGlobalDiscussionModal">
+                            <i class="fas fa-plus me-2"></i>New Global Discussion
+                        </button>
+                    </div>
+                    <div class="vr"></div>
+                    <a href="{{ url_for('discussions') }}" class="btn btn-outline-primary btn-lg switch-btn">
+                        <i class="fas fa-building me-2"></i>Switch to Organization
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Breadcrumb -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{{ url_for('dashboard') }}" class="text-decoration-none">
+                                <i class="fas fa-home me-1"></i>Dashboard
+                            </a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">
+                            <i class="fas fa-globe me-1"></i>Global Network
+                        </li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Category Filter -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h6>Filter by Category:</h6>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('')">All Topics</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('teaching-methods')">Teaching Methods</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('classroom-management')">Classroom Management</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('technology')">Technology</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('resources')">Resources</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="filterGlobalDiscussions('general')">General</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Global Discussions List -->
+        <div class="row">
+            <div class="col-12">
+                {% if discussions %}
+                    {% for discussion in discussions %}
+                    <div class="card global-discussion-card mb-3 {% if discussion.is_pinned %}pinned-discussion{% endif %}">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="card-title mb-0">
+                                    {% if discussion.is_pinned %}
+                                    <i class="fas fa-thumbtack text-warning me-2"></i>
+                                    {% endif %}
+                                    {{ discussion.title }}
+                                </h5>
+                                <small class="text-muted">{{ discussion.created_at[:16] }}</small>
+                            </div>
+                            
+                            <p class="card-text">{{ discussion.content[:200] }}{% if discussion.content|length > 200 %}...{% endif %}</p>
+                            
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <span class="badge bg-primary me-2">{{ discussion.author_organization }}</span>
+                                    <span class="badge bg-secondary me-2">{{ discussion.category.replace('-', ' ').title() }}</span>
+                                    <small class="text-muted">
+                                        <i class="fas fa-user me-1"></i>{{ discussion.first_name }} {{ discussion.last_name }}
+                                        <i class="fas fa-comments me-1 ms-3"></i>{{ discussion.reply_count or 0 }} replies
+                                    </small>
+                                </div>
+                                <button class="btn btn-outline-success btn-sm" onclick="viewGlobalDiscussion({{ discussion.id }})">
+                                    <i class="fas fa-eye me-1"></i>View Discussion
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="card">
+                        <div class="card-body text-center py-5">
+                            <i class="fas fa-globe fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No global discussions yet</h5>
+                            <p class="text-muted">Be the first to start a global discussion!</p>
+                            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newGlobalDiscussionModal">
+                                <i class="fas fa-plus me-2"></i>Start Global Discussion
+                            </button>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- New Global Discussion Modal -->
+        <div class="modal fade" id="newGlobalDiscussionModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Start Global Discussion</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="newGlobalDiscussionForm">
+                            <div class="mb-3">
+                                <label for="globalDiscussionTitle" class="form-label">Title *</label>
+                                <input type="text" class="form-control" id="globalDiscussionTitle" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="globalDiscussionContent" class="form-label">Content *</label>
+                                <textarea class="form-control" id="globalDiscussionContent" rows="5" required></textarea>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="globalDiscussionCategory" class="form-label">Category</label>
+                                        <select class="form-select" id="globalDiscussionCategory">
+                                            <option value="general">General</option>
+                                            <option value="teaching-methods">Teaching Methods</option>
+                                            <option value="classroom-management">Classroom Management</option>
+                                            <option value="technology">Technology</option>
+                                            <option value="resources">Resources</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="globalDiscussionTags" class="form-label">Tags</label>
+                                        <input type="text" class="form-control" id="globalDiscussionTags" placeholder="tag1, tag2, tag3">
+                                        <div class="form-text">Separate tags with commas</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>Note:</strong> This discussion will be visible to educators from all organizations. Please be respectful and constructive in your contributions.
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-success" id="createGlobalDiscussionBtn">
+                            <i class="fas fa-globe me-2"></i>Start Global Discussion
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Create new global discussion
+    document.getElementById('createGlobalDiscussionBtn').addEventListener('click', function() {
+        const title = document.getElementById('globalDiscussionTitle').value;
+        const content = document.getElementById('globalDiscussionContent').value;
+        const category = document.getElementById('globalDiscussionCategory').value;
+        const tags = document.getElementById('globalDiscussionTags').value;
+
+        if (!title || !content) {
+            alert('Please fill in all required fields');
+            return;
+        }
+
+        const discussionData = {
+            title: title,
+            content: content,
+            category: category,
+            tags: tags
+        };
+
+        fetch('/api/create_global_discussion', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(discussionData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Global discussion started successfully!');
+                location.reload();
+            } else {
+                alert('Failed to start global discussion: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred');
+        });
+    });
+
+    function viewGlobalDiscussion(discussionId) {
+        // TODO: Implement global discussion details view
+        alert('View global discussion details for ID: ' + discussionId);
+    }
+
+    function filterGlobalDiscussions(category) {
+        // Reload page with category filter
+        const url = new URL(window.location);
+        if (category) {
+            url.searchParams.set('category', category);
+        } else {
+            url.searchParams.delete('category');
+        }
+        window.location.href = url.toString();
+    }
+</script>
+{% endblock %}

@@ -796,14 +796,24 @@ class WebDatabaseManager:
         """Get resources for a specific class"""
         conn = self.get_connection()
         try:
-            cursor = conn.execute("""
-                SELECT r.*, s.name as subject_name, u.first_name, u.last_name
-                FROM resources r
-                LEFT JOIN subjects s ON r.subject_id = s.id
-                LEFT JOIN users u ON r.uploaded_by = u.id
-                WHERE r.class_id = ?
-                ORDER BY r.created_at DESC
-            """, (class_id,))
+            # Check what columns exist in resources table
+            cursor = conn.execute("PRAGMA table_info(resources)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            # Build query based on available columns
+            base_query = "SELECT r.*, u.first_name, u.last_name"
+            from_clause = "FROM resources r LEFT JOIN users u ON r.uploaded_by = u.id"
+            where_clause = "WHERE r.class_id = ?"
+            params = [class_id]
+            
+            # Add subject join if subject_id column exists
+            if 'subject_id' in columns:
+                base_query += ", s.name as subject_name"
+                from_clause += " LEFT JOIN subjects s ON r.subject_id = s.id"
+            
+            query = f"{base_query} {from_clause} {where_clause} ORDER BY r.created_at DESC"
+            
+            cursor = conn.execute(query, params)
             resources = [dict(row) for row in cursor.fetchall()]
             return resources
         except Exception as e:

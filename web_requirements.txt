@@ -1,4 +1,4 @@
-# TeacherApp Web Version Requirements
+# StaffRoom Web Version Requirements
 # Flask web application with modern UI
 
 Flask==2.3.3

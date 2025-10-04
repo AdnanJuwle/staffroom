@@ -1,6 +1,6 @@
-# TeacherApp Web Version
+# StaffRoom Web Version
 
-A modern web application version of TeacherApp built with Flask and Bootstrap 5.
+A modern web application version of StaffRoom built with Flask and Bootstrap 5.
 
 ## Features
 
@@ -210,4 +210,4 @@ For questions or issues with the web version:
 
 ---
 
-**TeacherApp Web Version** - Modern web interface for teacher management! 🌐✨
+**StaffRoom Web Version** - Modern web interface for teacher management! 🌐✨

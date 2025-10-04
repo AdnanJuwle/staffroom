@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TeacherApp Web Version - Flask Web Application
+StaffRoom Web Version - Flask Web Application
 Modern web interface for teacher management system
 """
 

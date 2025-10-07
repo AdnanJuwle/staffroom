@@ -4,7 +4,7 @@ StaffRoom Web Version - Flask Web Application
 Modern web interface for teacher management system
 """
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
@@ -1245,6 +1245,11 @@ def register():
             flash('Registration failed. Username or email may already exist.', 'error')
     
     return render_template('register.html')
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files (images, resources, etc.)"""
+    return send_from_directory('uploads', filename)
 
 @app.route('/dashboard')
 @require_organization_access

@@ -241,6 +241,8 @@ class WebDatabaseManager:
                 website TEXT,
                 logo_filename TEXT,
                 logo_path TEXT,
+                banner_filename TEXT,
+                banner_path TEXT,
                 is_public BOOLEAN DEFAULT 1,
                 discussion_privacy TEXT DEFAULT 'public' CHECK (discussion_privacy IN ('public', 'private')),
                 created_by INTEGER NOT NULL,
@@ -249,6 +251,16 @@ class WebDatabaseManager:
                 FOREIGN KEY (created_by) REFERENCES users (id)
             )
         """)
+        
+        # Add banner columns if they don't exist (for existing databases)
+        try:
+            conn.execute("ALTER TABLE organizations ADD COLUMN banner_filename TEXT")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE organizations ADD COLUMN banner_path TEXT")
+        except:
+            pass
         
         # Organization memberships
         conn.execute("""
@@ -1781,7 +1793,7 @@ def api_get_profile():
 
 @app.route('/api/update_profile', methods=['POST'])
 def api_update_profile():
-    """Update user profile (first name, last name, phone, bio)"""
+    """Update user profile (first name, last name, phone, bio, photo)"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
@@ -1791,6 +1803,21 @@ def api_update_profile():
     last_name = data.get('last_name')
     phone_number = data.get('phone_number')
     bio = data.get('bio')
+    
+    # Handle profile photo upload
+    profile_photo_path = None
+    if 'profile_photo' in request.files:
+        file = request.files['profile_photo']
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            # Create unique filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"profile_{session['user_id']}_{timestamp}_{filename}"
+            filepath = os.path.join('uploads', 'profiles', filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            file.save(filepath)
+            profile_photo_path = filepath
     
     conn = db.get_connection()
     try:
@@ -1815,6 +1842,10 @@ def api_update_profile():
             updates.append("bio = ?")
             params.append(bio)
         
+        if profile_photo_path:
+            updates.append("profile_photo_path = ?")
+            params.append(profile_photo_path)
+        
         if updates:
             updates.append("updated_at = CURRENT_TIMESTAMP")
             params.append(session['user_id'])
@@ -1824,7 +1855,11 @@ def api_update_profile():
             conn.commit()
         
         conn.close()
-        return jsonify({'success': True, 'message': 'Profile updated successfully'})
+        return jsonify({
+            'success': True, 
+            'message': 'Profile updated successfully',
+            'profile_photo_path': profile_photo_path if profile_photo_path else None
+        })
     except Exception as e:
         conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2198,6 +2233,83 @@ def api_create_organization():
             return jsonify({'error': f'Failed to create organization: {str(e)}'}), 500
     
     return jsonify({'error': 'Invalid request'}), 400
+
+@app.route('/api/update_organization', methods=['POST'])
+def api_update_organization():
+    """Update organization (admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    org_id = request.form.get('organization_id') or (request.get_json() or {}).get('organization_id')
+    if not org_id:
+        return jsonify({'error': 'Organization ID required'}), 400
+    
+    # Check if user is admin of this organization
+    conn = db.get_connection()
+    membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, session['user_id'])).fetchone()
+    
+    if not membership or membership['role'] != 'admin':
+        conn.close()
+        return jsonify({'error': 'Only organization admins can edit'}), 403
+    
+    # Get update data
+    data = request.get_json() if request.is_json else request.form
+    
+    updates = []
+    params = []
+    
+    for field in ['name', 'description', 'about', 'location', 'contact_email', 'contact_phone', 'website']:
+        if field in data:
+            updates.append(f"{field} = ?")
+            params.append(data[field])
+    
+    if 'is_public' in data:
+        updates.append("is_public = ?")
+        params.append(1 if data['is_public'] else 0)
+    
+    if 'discussion_privacy' in data:
+        updates.append("discussion_privacy = ?")
+        params.append(data['discussion_privacy'])
+    
+    # Handle logo upload
+    if 'logo' in request.files:
+        file = request.files['logo']
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"org_{org_id}_logo_{timestamp}_{filename}"
+            filepath = os.path.join('uploads', 'logos', filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            file.save(filepath)
+            updates.append("logo_path = ?")
+            params.append(filepath)
+    
+    # Handle banner upload
+    if 'banner' in request.files:
+        file = request.files['banner']
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"org_{org_id}_banner_{timestamp}_{filename}"
+            filepath = os.path.join('uploads', 'banners', filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            file.save(filepath)
+            updates.append("banner_path = ?")
+            params.append(filepath)
+    
+    if updates:
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(org_id)
+        
+        query = f"UPDATE organizations SET {', '.join(updates)} WHERE id = ?"
+        conn.execute(query, params)
+        conn.commit()
+    
+    conn.close()
+    return jsonify({'success': True, 'message': 'Organization updated successfully'})
 
 @app.route('/api/create_schedule_event', methods=['POST'])
 def api_create_schedule_event():

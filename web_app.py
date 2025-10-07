@@ -1584,6 +1584,225 @@ def logout():
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
 
+# Mobile API Endpoints
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    """API endpoint for mobile login"""
+    data = request.get_json() if request.is_json else request.form
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    
+    user = db.authenticate_user(username, password)
+    if user:
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        session['user_type'] = user['user_type']
+        session['first_name'] = user['first_name']
+        session['last_name'] = user['last_name']
+        
+        # Get user's current organization
+        current_org = db.get_user_current_organization(user['id'])
+        if current_org:
+            session['current_org_id'] = current_org['id']
+            session['current_org_role'] = current_org['role']
+            session['current_org_name'] = current_org['name']
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user['id'],
+                'username': user['username'],
+                'email': user['email'],
+                'first_name': user['first_name'],
+                'last_name': user['last_name'],
+                'user_type': user['user_type']
+            },
+            'organization': {
+                'id': current_org['id'],
+                'name': current_org['name'],
+                'role': current_org['role']
+            } if current_org else None
+        })
+    else:
+        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    """API endpoint for mobile registration"""
+    data = request.get_json() if request.is_json else request.form
+    
+    username = data.get('username')
+    email = data.get('email')
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    password = data.get('password')
+    user_type = data.get('user_type')
+    
+    if not all([username, email, password, first_name, last_name, user_type]):
+        return jsonify({'success': False, 'error': 'All fields required'}), 400
+    
+    if db.create_user(username, email, password, first_name, last_name, user_type):
+        return jsonify({'success': True, 'message': 'Registration successful'})
+    else:
+        return jsonify({'success': False, 'error': 'Username or email already exists'}), 400
+
+@app.route('/api/get_classes', methods=['GET'])
+def api_get_classes():
+    """Get classes for logged-in teacher"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    if session['user_type'] != 'teacher':
+        return jsonify({'error': 'Only teachers can access classes'}), 403
+    
+    classes = db.get_teacher_classes(session['user_id'])
+    return jsonify({'success': True, 'classes': classes})
+
+@app.route('/api/get_students', methods=['GET'])
+def api_get_students():
+    """Get all students"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    students = db.get_all_students()
+    return jsonify({'success': True, 'students': students})
+
+@app.route('/api/get_subjects', methods=['GET'])
+def api_get_subjects():
+    """Get all subjects"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    subjects = db.get_all_subjects()
+    return jsonify({'success': True, 'subjects': subjects})
+
+@app.route('/api/get_organizations', methods=['GET'])
+def api_get_organizations():
+    """Get all organizations"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    organizations = db.get_all_organizations()
+    user_orgs = db.get_user_organizations(session['user_id'])
+    
+    return jsonify({
+        'success': True,
+        'organizations': organizations,
+        'user_organizations': user_orgs
+    })
+
+@app.route('/api/get_resources', methods=['GET'])
+def api_get_resources():
+    """Get resources for current organization"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    current_org_id = session.get('current_org_id')
+    if not current_org_id:
+        return jsonify({'success': True, 'resources': []})
+    
+    resources = db.get_resources_by_organization(current_org_id)
+    return jsonify({'success': True, 'resources': resources})
+
+@app.route('/api/get_discussions', methods=['GET'])
+def api_get_discussions():
+    """Get discussions for current organization"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    current_org_id = session.get('current_org_id')
+    if not current_org_id:
+        return jsonify({'success': True, 'discussions': []})
+    
+    discussions = db.get_discussions_by_organization(current_org_id)
+    return jsonify({'success': True, 'discussions': discussions})
+
+@app.route('/api/get_global_discussions', methods=['GET'])
+def api_get_global_discussions():
+    """Get global discussions"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    discussions = db.get_global_discussions()
+    return jsonify({'success': True, 'discussions': discussions})
+
+@app.route('/api/get_profile', methods=['GET'])
+def api_get_profile():
+    """Get user profile"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Get user data
+    conn = db.get_connection()
+    cursor = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],))
+    user = cursor.fetchone()
+    
+    # Get user's organization
+    current_org = db.get_user_current_organization(session['user_id'])
+    
+    # Get teacher's classes if teacher
+    classes = []
+    if session['user_type'] == 'teacher':
+        classes = db.get_teacher_classes(session['user_id'])
+    
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'user': dict(user) if user else None,
+        'organization': current_org,
+        'classes': classes
+    })
+
+@app.route('/api/update_profile', methods=['POST'])
+def api_update_profile():
+    """Update user profile (extended info)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json()
+    
+    # For now, store in session or could extend database
+    # This is a placeholder for profile updates
+    return jsonify({'success': True, 'message': 'Profile updated'})
+
+@app.route('/api/create_student', methods=['POST'])
+def api_create_student():
+    """Create a new student"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() if request.is_json else request.form
+    
+    username = data.get('username')
+    email = data.get('email')
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    password = data.get('password')
+    
+    if not all([username, email, password, first_name, last_name]):
+        return jsonify({'success': False, 'error': 'All fields required'}), 400
+    
+    if db.create_user(username, email, password, first_name, last_name, 'student', session.get('current_org_id')):
+        return jsonify({'success': True, 'message': 'Student created successfully'})
+    else:
+        return jsonify({'success': False, 'error': 'Username or email already exists'}), 400
+
+@app.route('/api/get_schedule', methods=['GET'])
+def api_get_schedule():
+    """Get schedule for teacher"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    if session['user_type'] != 'teacher':
+        return jsonify({'error': 'Only teachers can access schedule'}), 403
+    
+    events = db.get_teacher_schedule(session['user_id'])
+    return jsonify({'success': True, 'events': events})
+
 # API Routes
 @app.route('/api/create_class', methods=['POST'])
 def api_create_class():
@@ -1836,7 +2055,41 @@ def api_create_organization():
     if 'user_id' not in session or session['user_type'] not in ['teacher']:
         return jsonify({'error': 'Only teachers can create organizations'}), 403
     
-    # Handle form data with logo upload
+    # Handle JSON data (for mobile API)
+    if request.is_json:
+        data = request.get_json()
+        name = data.get('name')
+        description = data.get('description', '')
+        about = data.get('about', '')
+        location = data.get('location', '')
+        contact_email = data.get('contact_email', '')
+        contact_phone = data.get('contact_phone', '')
+        website = data.get('website', '')
+        is_public = data.get('is_public', True)
+        discussion_privacy = data.get('discussion_privacy', 'public')
+        logo_filename = None
+        logo_path = None
+        
+        if not name:
+            return jsonify({'error': 'Organization name is required'}), 400
+        
+        try:
+            org_id = db.create_organization(
+                name, description, about, location, contact_email, 
+                contact_phone, website, logo_filename, logo_path, 
+                session['user_id'], is_public, discussion_privacy
+            )
+            
+            if org_id and org_id > 0:
+                # Add creator as admin
+                db.add_organization_member(org_id, session['user_id'], 'admin')
+                return jsonify({'success': True, 'organization_id': org_id})
+            else:
+                return jsonify({'error': 'Failed to create organization'}), 500
+        except Exception as e:
+            return jsonify({'error': f'Failed to create organization: {str(e)}'}), 500
+    
+    # Handle form data with logo upload (for web)
     if request.form:
         name = request.form.get('name')
         description = request.form.get('description')
@@ -2011,22 +2264,10 @@ def create_default_admin():
     """Create a default teacher user for testing"""
     try:
         db = WebDatabaseManager()
-        # Check if any users exist by trying to get a user
-        try:
-            db.get_user_by_username('teacher')
-            print("Default teacher user already exists")
-        except:
-            # Create a default teacher user
-            db.create_user(
-                username='teacher',
-                password='password',
-                first_name='Test',
-                last_name='Teacher',
-                user_type='teacher'
-            )
-            print("Default teacher user created: username='teacher', password='password'")
+        # The default admin is already created in WebDatabaseManager.create_default_admin()
+        print("Default users initialized via WebDatabaseManager")
     except Exception as e:
-        print(f"Error creating default admin: {e}")
+        print(f"Error initializing default admin: {e}")
 
 if __name__ == '__main__':
     # Production-ready configuration
@@ -2043,5 +2284,13 @@ if __name__ == '__main__':
     
     # Create default admin user
     create_default_admin()
+    
+    # host='0.0.0.0' allows connections from phone on same network
+    print(f"\n{'='*60}")
+    print(f"🚀 StaffRoom Server Starting")
+    print(f"{'='*60}")
+    print(f"📍 Local:    http://localhost:{port}")
+    print(f"📱 Network:  http://<your-ip>:{port}")
+    print(f"{'='*60}\n")
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port)

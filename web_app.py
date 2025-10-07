@@ -1820,6 +1820,25 @@ def api_update_profile():
     
     conn = db.get_connection()
     try:
+        # Ensure columns exist
+        try:
+            conn.execute("SELECT phone_number, bio, profile_photo_path FROM users LIMIT 1")
+        except:
+            # Add missing columns
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN phone_number TEXT")
+            except:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
+            except:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN profile_photo_path TEXT")
+            except:
+                pass
+            conn.commit()
+        
         updates = []
         params = []
         
@@ -1846,9 +1865,7 @@ def api_update_profile():
             params.append(profile_photo_path)
         
         if updates:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
             params.append(session['user_id'])
-            
             query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
             conn.execute(query, params)
             conn.commit()
@@ -1861,6 +1878,7 @@ def api_update_profile():
         })
     except Exception as e:
         conn.close()
+        print(f"Error updating profile: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/create_student', methods=['POST'])

@@ -77,10 +77,32 @@ class WebDatabaseManager:
                 first_name TEXT NOT NULL,
                 last_name TEXT NOT NULL,
                 user_type TEXT NOT NULL CHECK (user_type IN ('teacher', 'student', 'admin')),
+                phone_number TEXT,
+                profile_photo_path TEXT,
+                bio TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT 1
             )
         """)
+        
+        # Add columns if they don't exist (for existing databases)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN phone_number TEXT")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN profile_photo_path TEXT")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN bio TEXT")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        except:
+            pass
         
         # Subjects table
         conn.execute("""
@@ -1759,15 +1781,53 @@ def api_get_profile():
 
 @app.route('/api/update_profile', methods=['POST'])
 def api_update_profile():
-    """Update user profile (extended info)"""
+    """Update user profile (first name, last name, phone, bio)"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    data = request.get_json()
+    data = request.get_json() if request.is_json else request.form
     
-    # For now, store in session or could extend database
-    # This is a placeholder for profile updates
-    return jsonify({'success': True, 'message': 'Profile updated'})
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    phone_number = data.get('phone_number')
+    bio = data.get('bio')
+    
+    conn = db.get_connection()
+    try:
+        updates = []
+        params = []
+        
+        if first_name:
+            updates.append("first_name = ?")
+            params.append(first_name)
+            session['first_name'] = first_name
+        
+        if last_name:
+            updates.append("last_name = ?")
+            params.append(last_name)
+            session['last_name'] = last_name
+        
+        if phone_number is not None:
+            updates.append("phone_number = ?")
+            params.append(phone_number)
+        
+        if bio is not None:
+            updates.append("bio = ?")
+            params.append(bio)
+        
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(session['user_id'])
+            
+            query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+            conn.execute(query, params)
+            conn.commit()
+        
+        conn.close()
+        return jsonify({'success': True, 'message': 'Profile updated successfully'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/create_student', methods=['POST'])
 def api_create_student():

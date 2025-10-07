@@ -268,7 +268,7 @@ class WebDatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 organization_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
-                role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'moderator', 'member')),
+                role TEXT DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (organization_id) REFERENCES organizations (id),
                 FOREIGN KEY (user_id) REFERENCES users (id),
@@ -1811,7 +1811,6 @@ def api_update_profile():
         if file and file.filename:
             filename = secure_filename(file.filename)
             # Create unique filename
-            from datetime import datetime
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"profile_{session['user_id']}_{timestamp}_{filename}"
             filepath = os.path.join('uploads', 'profiles', filename)
@@ -2176,8 +2175,21 @@ def api_create_organization():
             )
             
             if org_id and org_id > 0:
-                # Add creator as admin
-                db.add_organization_member(org_id, session['user_id'], 'admin')
+                # Remove user from current organization first
+                conn = db.get_connection()
+                conn.execute("""
+                    DELETE FROM organization_memberships 
+                    WHERE user_id = ?
+                """, (session['user_id'],))
+                conn.commit()
+                conn.close()
+                
+                # Add creator as owner
+                db.add_organization_member(org_id, session['user_id'], 'owner')
+                
+                # Update session
+                session['organization_id'] = org_id
+                
                 return jsonify({'success': True, 'organization_id': org_id})
             else:
                 return jsonify({'error': 'Failed to create organization'}), 500
@@ -2223,8 +2235,21 @@ def api_create_organization():
             )
             
             if org_id and org_id > 0:
-                # Add creator as admin
-                db.add_organization_member(org_id, session['user_id'], 'admin')
+                # Remove user from current organization first
+                conn = db.get_connection()
+                conn.execute("""
+                    DELETE FROM organization_memberships 
+                    WHERE user_id = ?
+                """, (session['user_id'],))
+                conn.commit()
+                conn.close()
+                
+                # Add creator as owner
+                db.add_organization_member(org_id, session['user_id'], 'owner')
+                
+                # Update session
+                session['organization_id'] = org_id
+                
                 return jsonify({'success': True, 'organization_id': org_id})
             else:
                 return jsonify({'error': 'Failed to create organization'}), 500
@@ -2244,16 +2269,16 @@ def api_update_organization():
     if not org_id:
         return jsonify({'error': 'Organization ID required'}), 400
     
-    # Check if user is admin of this organization
+    # Check if user is owner or admin of this organization
     conn = db.get_connection()
     membership = conn.execute("""
         SELECT role FROM organization_memberships 
         WHERE organization_id = ? AND user_id = ?
     """, (org_id, session['user_id'])).fetchone()
     
-    if not membership or membership['role'] != 'admin':
+    if not membership or membership['role'] not in ['owner', 'admin']:
         conn.close()
-        return jsonify({'error': 'Only organization admins can edit'}), 403
+        return jsonify({'error': 'Only organization owners and admins can edit'}), 403
     
     # Get update data
     data = request.get_json() if request.is_json else request.form
@@ -2310,6 +2335,158 @@ def api_update_organization():
     
     conn.close()
     return jsonify({'success': True, 'message': 'Organization updated successfully'})
+
+@app.route('/api/get_organization_members/<int:org_id>', methods=['GET'])
+def api_get_organization_members(org_id):
+    """Get all members of an organization"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    conn = db.get_connection()
+    
+    # Check if user is member of this organization
+    membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, session['user_id'])).fetchone()
+    
+    if not membership:
+        conn.close()
+        return jsonify({'error': 'Not a member of this organization'}), 403
+    
+    # Get all members
+    members = conn.execute("""
+        SELECT u.id, u.username, u.first_name, u.last_name, u.email, 
+               u.user_type, u.profile_photo_path, om.role, om.joined_at
+        FROM users u
+        JOIN organization_memberships om ON u.id = om.user_id
+        WHERE om.organization_id = ?
+        ORDER BY 
+            CASE om.role 
+                WHEN 'owner' THEN 1
+                WHEN 'admin' THEN 2
+                WHEN 'member' THEN 3
+            END,
+            om.joined_at
+    """, (org_id,)).fetchall()
+    
+    conn.close()
+    return jsonify({
+        'success': True,
+        'members': [dict(m) for m in members],
+        'user_role': membership['role']
+    })
+
+@app.route('/api/update_member_role', methods=['POST'])
+def api_update_member_role():
+    """Update organization member role (owner/admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() if request.is_json else request.form
+    org_id = data.get('organization_id')
+    member_id = data.get('member_id')
+    new_role = data.get('role')
+    
+    if not all([org_id, member_id, new_role]):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    if new_role not in ['owner', 'admin', 'member']:
+        return jsonify({'error': 'Invalid role'}), 400
+    
+    conn = db.get_connection()
+    
+    # Check if user is owner or admin
+    user_membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, session['user_id'])).fetchone()
+    
+    if not user_membership or user_membership['role'] not in ['owner', 'admin']:
+        conn.close()
+        return jsonify({'error': 'Only owners and admins can change roles'}), 403
+    
+    # Check target member's current role
+    member_membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, member_id)).fetchone()
+    
+    if not member_membership:
+        conn.close()
+        return jsonify({'error': 'Member not found'}), 404
+    
+    # Admins cannot change owner roles or promote to owner
+    if user_membership['role'] == 'admin':
+        if member_membership['role'] == 'owner' or new_role == 'owner':
+            conn.close()
+            return jsonify({'error': 'Only owners can manage owner roles'}), 403
+    
+    # Update role
+    conn.execute("""
+        UPDATE organization_memberships 
+        SET role = ? 
+        WHERE organization_id = ? AND user_id = ?
+    """, (new_role, org_id, member_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': 'Role updated successfully'})
+
+@app.route('/api/remove_member', methods=['POST'])
+def api_remove_member():
+    """Remove member from organization (owner/admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() if request.is_json else request.form
+    org_id = data.get('organization_id')
+    member_id = data.get('member_id')
+    
+    if not all([org_id, member_id]):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    conn = db.get_connection()
+    
+    # Check if user is owner or admin
+    user_membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, session['user_id'])).fetchone()
+    
+    if not user_membership or user_membership['role'] not in ['owner', 'admin']:
+        conn.close()
+        return jsonify({'error': 'Only owners and admins can remove members'}), 403
+    
+    # Check target member's role
+    member_membership = conn.execute("""
+        SELECT role FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, member_id)).fetchone()
+    
+    if not member_membership:
+        conn.close()
+        return jsonify({'error': 'Member not found'}), 404
+    
+    # Cannot remove yourself
+    if member_id == session['user_id']:
+        conn.close()
+        return jsonify({'error': 'Cannot remove yourself'}), 400
+    
+    # Admins cannot remove owners
+    if user_membership['role'] == 'admin' and member_membership['role'] == 'owner':
+        conn.close()
+        return jsonify({'error': 'Only owners can remove other owners'}), 403
+    
+    # Remove member
+    conn.execute("""
+        DELETE FROM organization_memberships 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, member_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': 'Member removed successfully'})
 
 @app.route('/api/create_schedule_event', methods=['POST'])
 def api_create_schedule_event():

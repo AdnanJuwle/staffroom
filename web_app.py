@@ -2200,15 +2200,28 @@ def api_create_organization():
                     WHERE user_id = ?
                 """, (session['user_id'],))
                 conn.commit()
-                conn.close()
                 
                 # Add creator as owner
                 db.add_organization_member(org_id, session['user_id'], 'owner')
                 
+                # Get the created organization details
+                org = conn.execute("""
+                    SELECT * FROM organizations WHERE id = ?
+                """, (org_id,)).fetchone()
+                conn.close()
+                
                 # Update session
                 session['organization_id'] = org_id
+                session['current_org_id'] = org_id
+                session['current_org_name'] = org['name'] if org else 'Unknown'
+                session['current_org_role'] = 'owner'
                 
-                return jsonify({'success': True, 'organization_id': org_id})
+                return jsonify({
+                    'success': True, 
+                    'organization_id': org_id,
+                    'organization': dict(org) if org else None,
+                    'role': 'owner'
+                })
             else:
                 return jsonify({'error': 'Failed to create organization'}), 500
         except Exception as e:
@@ -2260,15 +2273,28 @@ def api_create_organization():
                     WHERE user_id = ?
                 """, (session['user_id'],))
                 conn.commit()
-                conn.close()
                 
                 # Add creator as owner
                 db.add_organization_member(org_id, session['user_id'], 'owner')
                 
+                # Get the created organization details
+                org = conn.execute("""
+                    SELECT * FROM organizations WHERE id = ?
+                """, (org_id,)).fetchone()
+                conn.close()
+                
                 # Update session
                 session['organization_id'] = org_id
+                session['current_org_id'] = org_id
+                session['current_org_name'] = org['name'] if org else 'Unknown'
+                session['current_org_role'] = 'owner'
                 
-                return jsonify({'success': True, 'organization_id': org_id})
+                return jsonify({
+                    'success': True, 
+                    'organization_id': org_id,
+                    'organization': dict(org) if org else None,
+                    'role': 'owner'
+                })
             else:
                 return jsonify({'error': 'Failed to create organization'}), 500
         except Exception as e:

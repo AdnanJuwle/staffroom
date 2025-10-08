@@ -606,7 +606,7 @@ class WebDatabaseManager:
         conn = self.get_connection()
         try:
             conn.execute("""
-                INSERT INTO class_enrollments (class_id, student_id)
+                INSERT INTO class_students (class_id, student_id)
                 VALUES (?, ?)
             """, (class_id, student_id))
             conn.commit()
@@ -616,17 +616,49 @@ class WebDatabaseManager:
         finally:
             conn.close()
     
+    def unenroll_student(self, class_id, student_id):
+        """Remove student from class"""
+        conn = self.get_connection()
+        try:
+            conn.execute("""
+                DELETE FROM class_students 
+                WHERE class_id = ? AND student_id = ?
+            """, (class_id, student_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error unenrolling student: {e}")
+            return False
+        finally:
+            conn.close()
+    
     def get_class_students(self, class_id):
         """Get all students in a class"""
         conn = self.get_connection()
         cursor = conn.execute("""
-            SELECT u.* FROM users u
-            JOIN class_enrollments ce ON u.id = ce.student_id
-            WHERE ce.class_id = ?
+            SELECT u.*, cs.enrolled_at FROM users u
+            JOIN class_students cs ON u.id = cs.student_id
+            WHERE cs.class_id = ?
+            ORDER BY u.first_name, u.last_name
         """, (class_id,))
         students = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return students
+    
+    def get_student_classes(self, student_id):
+        """Get all classes a student is enrolled in"""
+        conn = self.get_connection()
+        cursor = conn.execute("""
+            SELECT c.*, s.name as subject_name, cs.enrolled_at 
+            FROM classes c
+            JOIN class_students cs ON c.id = cs.class_id
+            JOIN subjects s ON c.subject_id = s.id
+            WHERE cs.student_id = ?
+            ORDER BY c.name
+        """, (student_id,))
+        classes = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return classes
     
     def get_discussions_by_organization(self, organization_id):
         """Get discussions for an organization"""
@@ -1978,7 +2010,7 @@ def api_register():
 
 @app.route('/api/get_classes', methods=['GET'])
 def api_get_classes():
-    """Get classes for user's organization"""
+    """Get classes for user's organization (students only see enrolled classes)"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
@@ -1989,13 +2021,28 @@ def api_get_classes():
     if not org:
         return jsonify({'success': True, 'classes': []})
     
-    # Get all classes for the organization
     conn = db.get_connection()
-    cursor = conn.execute("""
-        SELECT c.* FROM classes c
-        WHERE c.organization_id = ?
-        ORDER BY c.name
-    """, (org['id'],))
+    
+    # Students only see classes they're enrolled in
+    if session['user_type'] == 'student':
+        cursor = conn.execute("""
+            SELECT c.*, s.name as subject_name
+            FROM classes c
+            JOIN class_students cs ON c.id = cs.class_id
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            WHERE cs.student_id = ? AND c.organization_id = ?
+            ORDER BY c.name
+        """, (session['user_id'], org['id']))
+    else:
+        # Teachers/admins see all organization classes
+        cursor = conn.execute("""
+            SELECT c.*, s.name as subject_name
+            FROM classes c
+            LEFT JOIN subjects s ON c.subject_id = s.id
+            WHERE c.organization_id = ?
+            ORDER BY c.name
+        """, (org['id'],))
+    
     classes = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -2488,13 +2535,69 @@ def api_create_class():
 
 @app.route('/api/enroll_student', methods=['POST'])
 def api_enroll_student():
-    if 'user_id' not in session or session['user_type'] not in ['admin', 'teacher']:
-        return jsonify({'error': 'Access denied'}), 403
+    """Enroll a student in a class"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Only teachers and admins can enroll students
+    if session['user_type'] == 'student':
+        return jsonify({'error': 'Students cannot enroll others in classes'}), 403
     
     data = request.get_json()
-    success = db.enroll_student(data['class_id'], data['student_id'])
+    class_id = data.get('class_id')
+    student_id = data.get('student_id')
     
-    return jsonify({'success': success})
+    if not all([class_id, student_id]):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    success = db.enroll_student(class_id, student_id)
+    
+    if success:
+        return jsonify({'success': True, 'message': 'Student enrolled successfully'})
+    else:
+        return jsonify({'success': False, 'error': 'Student already enrolled or enrollment failed'}), 400
+
+@app.route('/api/unenroll_student', methods=['POST'])
+def api_unenroll_student():
+    """Remove a student from a class"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Only teachers and admins can unenroll students
+    if session['user_type'] == 'student':
+        return jsonify({'error': 'Students cannot unenroll others from classes'}), 403
+    
+    data = request.get_json()
+    class_id = data.get('class_id')
+    student_id = data.get('student_id')
+    
+    if not all([class_id, student_id]):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    success = db.unenroll_student(class_id, student_id)
+    
+    if success:
+        return jsonify({'success': True, 'message': 'Student removed from class'})
+    else:
+        return jsonify({'success': False, 'error': 'Failed to remove student'}), 400
+
+@app.route('/api/get_class_students/<int:class_id>', methods=['GET'])
+def api_get_class_students(class_id):
+    """Get all students enrolled in a class"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    students = db.get_class_students(class_id)
+    return jsonify({'success': True, 'students': students})
+
+@app.route('/api/get_student_classes/<int:student_id>', methods=['GET'])
+def api_get_student_classes(student_id):
+    """Get all classes a student is enrolled in"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    classes = db.get_student_classes(student_id)
+    return jsonify({'success': True, 'classes': classes})
 
 @app.route('/api/create_user', methods=['POST'])
 def api_create_user():

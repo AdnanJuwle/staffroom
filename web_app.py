@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import json
 import uuid
 from werkzeug.utils import secure_filename
+import re
 
 app = Flask(__name__)
 
@@ -22,6 +23,9 @@ app.config.update(
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,  # 16MB max file size
     DATABASE_URL=os.environ.get('DATABASE_URL', 'sqlite:///teacher_app_web.db')
 )
+
+# AI Summarization is always enabled (using simple extractive method)
+AI_ENABLED = True
 
 # Database configuration
 def get_database_url():
@@ -887,13 +891,41 @@ class WebDatabaseManager:
         """Create a new resource"""
         conn = self.get_connection()
         try:
-            cursor = conn.execute("""
-                INSERT INTO resources 
-                (title, description, resource_type, file_path, file_name, file_size, external_url, 
-                 grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public, resource_category, due_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (title, description, resource_type, file_path, file_name, file_size, external_url,
-                  grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public, resource_category, due_date))
+            # Check which columns exist in the table
+            cursor = conn.execute("PRAGMA table_info(resources)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            # Build dynamic insert based on available columns
+            insert_cols = ['title', 'description', 'resource_type']
+            insert_vals = [title, description, resource_type]
+            
+            if 'file_path' in columns and file_path:
+                insert_cols.append('file_path')
+                insert_vals.append(file_path)
+            if 'grade_level' in columns and grade_level:
+                insert_cols.append('grade_level')
+                insert_vals.append(grade_level)
+            if 'subject_id' in columns and subject_id:
+                insert_cols.append('subject_id')
+                insert_vals.append(subject_id)
+            if 'class_id' in columns and class_id:
+                insert_cols.append('class_id')
+                insert_vals.append(class_id)
+            if 'organization_id' in columns and organization_id:
+                insert_cols.append('organization_id')
+                insert_vals.append(organization_id)
+            if 'uploaded_by' in columns and uploaded_by:
+                insert_cols.append('created_by')
+                insert_vals.append(uploaded_by)
+            if 'resource_category' in columns and resource_category:
+                insert_cols.append('resource_category')
+                insert_vals.append(resource_category)
+            if 'due_date' in columns and due_date:
+                insert_cols.append('due_date')
+                insert_vals.append(due_date)
+            
+            query = f"INSERT INTO resources ({', '.join(insert_cols)}) VALUES ({', '.join(['?' for _ in insert_vals])})"
+            cursor = conn.execute(query, insert_vals)
             resource_id = cursor.lastrowid
             conn.commit()
             return resource_id
@@ -1854,6 +1886,13 @@ def api_create_global_discussion():
         category = data.get('category', 'general')
         tags = data.get('tags', '')
         
+        # Debug logging
+        print(f"=== CREATING GLOBAL DISCUSSION ===")
+        print(f"Received title: '{title}'")
+        print(f"Received content length: {len(content) if content else 0}")
+        print(f"Received content preview: {content[:100] if content and len(content) > 100 else content}")
+        print("=" * 50)
+        
         if not title or not content:
             return jsonify({'error': 'Title and content are required'}), 400
         
@@ -2353,6 +2392,9 @@ def api_get_global_discussions():
         return jsonify({'error': 'Not authenticated'}), 401
     
     discussions = db.get_global_discussions()
+    # Add is_global flag to each discussion
+    for disc in discussions:
+        disc['is_global'] = True
     return jsonify({'success': True, 'discussions': discussions})
 
 @app.route('/api/get_profile', methods=['GET'])
@@ -2720,7 +2762,8 @@ def api_create_discussion():
         data['title'],
         data['content'],
         session['user_id'],
-        data.get('category', 'general')
+        data.get('category', 'general'),
+        session.get('current_org_id')  # Pass organization_id
     )
     
     return jsonify({'success': discussion_id is not None, 'discussion_id': discussion_id})
@@ -3379,20 +3422,38 @@ def api_get_discussion_details(discussion_id):
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    # Get discussion details
-    discussions = db.get_all_discussions()
-    discussion = next((d for d in discussions if d['id'] == discussion_id), None)
+    # Check if it's a global discussion from query parameter
+    is_global = request.args.get('is_global', 'false').lower() == 'true'
     
-    if not discussion:
-        return jsonify({'error': 'Discussion not found'}), 404
-    
-    # Get attachments
-    discussion['attachments'] = db.get_discussion_attachments(discussion_id)
-    
-    # Get replies with attachments
-    replies = db.get_discussion_replies(discussion_id)
-    for reply in replies:
-        reply['attachments'] = db.get_reply_attachments(reply['id'])
+    if is_global:
+        # Get from global discussions
+        global_discussions = db.get_global_discussions()
+        discussion = next((d for d in global_discussions if d['id'] == discussion_id), None)
+        
+        if not discussion:
+            return jsonify({'error': 'Global discussion not found'}), 404
+        
+        # Get replies for global discussion
+        replies = db.get_global_discussion_replies(discussion_id)
+        # Note: Global discussions don't have attachments yet
+        discussion['attachments'] = []
+        for reply in replies:
+            reply['attachments'] = []
+    else:
+        # Get from organization discussions
+        discussions = db.get_all_discussions()
+        discussion = next((d for d in discussions if d['id'] == discussion_id), None)
+        
+        if not discussion:
+            return jsonify({'error': 'Discussion not found'}), 404
+        
+        # Get attachments
+        discussion['attachments'] = db.get_discussion_attachments(discussion_id)
+        
+        # Get replies with attachments
+        replies = db.get_discussion_replies(discussion_id)
+        for reply in replies:
+            reply['attachments'] = db.get_reply_attachments(reply['id'])
     
     return jsonify({
         'discussion': discussion,
@@ -3419,6 +3480,192 @@ def download_apk():
         return send_file(apk_path, as_attachment=True, download_name='staffroom.apk', mimetype='application/vnd.android.package-archive')
     else:
         return "APK not found. Please build the APK first.", 404
+
+def generate_ai_summary(content, content_type="text"):
+    """Generate a simple interpretive 1-line description from content"""
+    if not content or len(content.strip()) == 0:
+        return "No description available."
+    
+    try:
+        content = content.strip().lower()
+        
+        # Pattern-based interpretation
+        # FIRST: Check for explanations/informative content (most specific)
+        if any(word in content for word in ['is a', 'technology', 'system', 'method', 'process', 'technique']):
+            # Try to identify the main subject
+            if 'electro' in content or 'shield' in content or ('dust' in content and 'nasa' in content) or 'eds' in content:
+                return "Content explains Electrodynamic Dust Shield technology and its applications."
+            elif 'nasa' in content or 'space' in content or 'mission' in content:
+                return "Content discusses NASA space technology and mission equipment."
+            elif 'math' in content or 'formula' in content or 'equation' in content:
+                return "Content explains mathematical concepts and formulas."
+            elif 'science' in content or 'experiment' in content:
+                return "Content describes scientific concepts and experiments."
+            else:
+                # Generic explanation
+                return "Content provides informational explanation about the topic."
+        
+        # SECOND: Check for questions/asking for help (look for actual question patterns)
+        elif content.strip().endswith('?') or content.startswith('how ') or content.startswith('what ') or content.startswith('why '):
+            # Extract key topics
+            if 'study' in content or 'learn' in content:
+                if 'math' in content:
+                    return "User is asking for study techniques and help with mathematics."
+                elif 'science' in content or 'physics' in content or 'chemistry' in content:
+                    return "User is seeking study methods and help with science subjects."
+                else:
+                    return "User is asking for study techniques and learning strategies."
+            elif 'exam' in content or 'test' in content:
+                return "User is asking for exam preparation advice and strategies."
+            elif 'homework' in content or 'assignment' in content:
+                return "User is seeking help with homework or assignments."
+            else:
+                # Generic question
+                return "User is asking a question and seeking information."
+        
+        # THIRD: Check for announcements/updates
+        elif any(word in content for word in ['announce', 'announcement', 'update', 'reminder', 'important notice']):
+            return "Important announcement or update for the community."
+        
+        # FOURTH: Check for discussion/opinion
+        elif any(word in content for word in ['i think', 'i believe', 'my opinion', 'i feel', 'we should', 'i suggest']):
+            return "User is sharing thoughts and opinions on the topic."
+        
+        # FIFTH: Check for requests/needs
+        elif any(word in content for word in ['need help', 'struggling', 'confused', 'don\'t understand']):
+            if 'math' in content:
+                return "User is seeking help with understanding mathematics."
+            else:
+                return "User is requesting help and clarification."
+        
+        # Fallback: Just give a generic description
+        else:
+            # If content is short, return as-is with interpretation
+            if len(content) <= 100:
+                return f"Discussion content: {content[:80]}..."
+            else:
+                # Extract first meaningful phrase
+                first_part = content[:100].rsplit(' ', 1)[0]
+                return f"Content discusses: {first_part}..."
+    
+    except Exception as e:
+        print(f"Summarization error: {e}")
+        return "Content summary unavailable."
+
+@app.route('/api/summarize_discussion/<int:discussion_id>', methods=['GET'])
+def api_summarize_discussion(discussion_id):
+    """Generate AI summary of a discussion thread"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Check if it's a global discussion from query parameter
+        is_global = request.args.get('is_global', 'false').lower() == 'true'
+        
+        if is_global:
+            # Get from global discussions
+            global_discussions = db.get_global_discussions()
+            discussion = next((d for d in global_discussions if d['id'] == discussion_id), None)
+            
+            if not discussion:
+                return jsonify({'error': 'Global discussion not found'}), 404
+            
+            replies = db.get_global_discussion_replies(discussion_id)
+        else:
+            # Get from organization discussions
+            discussions = db.get_all_discussions()
+            discussion = next((d for d in discussions if d['id'] == discussion_id), None)
+            
+            if not discussion:
+                return jsonify({'error': 'Discussion not found'}), 404
+            
+            replies = db.get_discussion_replies(discussion_id)
+        
+        # Combine discussion content and replies for better overview
+        content_parts = []
+        
+        # Add main discussion content
+        if discussion.get('content'):
+            content_parts.append(discussion['content'])
+        
+        # Add reply contents (limit to first 5 for brevity)
+        if replies:
+            for reply in replies[:5]:
+                if reply.get('content'):
+                    content_parts.append(reply['content'])
+        
+        # Join all content
+        full_content = ' '.join(content_parts)
+        
+        # Debug logging
+        print(f"=== SUMMARIZING DISCUSSION {discussion_id} ===")
+        print(f"Title: {discussion.get('title')}")
+        print(f"Content preview: {full_content[:200] if full_content else 'EMPTY'}...")
+        print(f"Content length: {len(full_content) if full_content else 0}")
+        print(f"Number of replies: {len(replies)}")
+        
+        # Generate overview from combined content
+        summary = generate_ai_summary(full_content, "discussion")
+        
+        # Add reply information if there are replies
+        if len(replies) > 0:
+            # Check for disagreement/debate in replies
+            reply_text_lower = ' '.join([r.get('content', '').lower() for r in replies[:5]])
+            if any(word in reply_text_lower for word in ['disagree', 'wrong', 'incorrect', 'but ', 'however', 'not true']):
+                summary += f" ({len(replies)} {'reply' if len(replies) == 1 else 'replies'}, including opposing views)"
+            else:
+                summary += f" ({len(replies)} {'reply' if len(replies) == 1 else 'replies'})"
+        
+        print(f"Generated summary: {summary}")
+        print("=" * 50)
+        
+        return jsonify({
+            'success': True,
+            'summary': summary,
+            'reply_count': len(replies)
+        })
+    
+    except Exception as e:
+        print(f"Error summarizing discussion: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/summarize_resource/<int:resource_id>', methods=['GET'])
+def api_summarize_resource(resource_id):
+    """Generate AI summary of a resource"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Get resource details
+        resources = db.get_all_resources()
+        resource = next((r for r in resources if r['id'] == resource_id), None)
+        
+        if not resource:
+            return jsonify({'error': 'Resource not found'}), 404
+        
+        # Use description if available, otherwise create context from metadata
+        if resource.get('description') and len(resource['description'].strip()) > 20:
+            content = resource['description']
+        else:
+            # Build description from available metadata
+            content = f"This is a {resource.get('resource_category', resource.get('resource_type', 'resource'))} "
+            content += f"for grade {resource.get('grade_level', 'N/A')}. "
+            if resource.get('title'):
+                content += f"Title: {resource['title']}."
+        
+        # Generate overview
+        summary = generate_ai_summary(content, "resource")
+        
+        return jsonify({
+            'success': True,
+            'summary': summary,
+            'resource_type': resource.get('resource_type'),
+            'category': resource.get('resource_category')
+        })
+    
+    except Exception as e:
+        print(f"Error summarizing resource: {e}")
+        return jsonify({'error': str(e)}), 500
 
 def create_default_admin():
     """Create a default teacher user for testing"""

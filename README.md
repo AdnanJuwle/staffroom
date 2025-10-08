@@ -20,13 +20,17 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 
 - 🎯 **Organization Management** - Create and manage educational organizations with role-based access control
 - 📚 **Class Management** - Organize classes by subject and grade (1st-12th)
-- 👥 **Student Management** - Track student enrollments and progress
-- 💬 **Discussion Forums** - Organization-wide and global discussions
-- 📁 **Resource Library** - Upload and share educational materials
-- 📅 **Schedule Management** - Class schedules and calendar events
+- 👥 **Student Management** - Track student enrollments, attendance, and progress
+- 📊 **Attendance System** - Mark and track student attendance with percentage calculations
+- 📝 **Assignment System** - Create and manage assignments with due dates and categories
+- 🎓 **Class Allocation** - Enroll students in specific classes with easy management
+- 💬 **Discussion Forums** - Organization-wide and global discussions with reply system
+- 📁 **Resource Library** - Upload and categorize educational materials (assignments, notes, test papers, practice questions)
+- 📅 **Schedule Management** - Class schedules and calendar events (teacher-only)
 - 👤 **Profile Management** - Customizable user profiles with photos
 - 🏢 **Organization Branding** - Custom logos and banners for organizations
-- 🔐 **Role-Based Access** - Owner, Admin, and Member roles with appropriate permissions
+- 🔐 **Role-Based Access** - Owner, Admin, Teacher, and Student roles with granular permissions
+- 🔔 **Notification System** - Real-time notifications for join requests and approvals
 
 ---
 
@@ -93,13 +97,20 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 
 ### Testing Credentials
 
-**Online Mode (requires server connection):**
+**Teacher Account:**
 - Username: `teacher`
 - Password: `teacher123`
+- Role: Can create classes, manage students, mark attendance
 
-**Offline Mode (for testing without server):**
-- Username: `admin`
-- Password: `admin123`
+**Student Account:**
+- Username: `student`
+- Password: `student123`
+- Role: View-only access, can edit own profile
+
+**Demo Students:**
+- Usernames: `student1` through `student10`
+- Password: `student123` (for all)
+- Auto-created for testing attendance and enrollment features
 
 ---
 
@@ -113,14 +124,17 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 
 ### 🏢 Organization Management
 - ✅ Create new organizations (auto-assigned as Owner)
-- ✅ Join existing organizations
-- ✅ View organization details with banner/logo
+- ✅ Join organization via request (requires admin approval)
+- ✅ View organization details with banner/logo overlay
 - ✅ Upload custom organization logo and banner
 - ✅ Edit organization details (Owner/Admin only)
 - ✅ View all organization members with roles
 - ✅ Manage member roles (Owner/Admin only)
 - ✅ Remove members (Owner/Admin only)
-- ✅ Role hierarchy: Owner > Admin > Member
+- ✅ Role hierarchy: Owner > Admin > Teacher > Student
+- ✅ Notification bell with pending join request count
+- ✅ Approve/Reject join requests (Owner/Admin only)
+- ✅ Auto-delete empty organizations
 
 ### 👤 Profile Management
 - ✅ Edit first name, last name, phone number, and bio
@@ -129,43 +143,59 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 - ✅ Beautiful profile UI with gradient header
 
 ### 📚 Classes
-- ✅ View all classes
-- ✅ Create new classes with subject and grade
-- ✅ View class details
-- ✅ Navigate to class-specific resources
+- ✅ View organization classes (teachers see all, students see enrolled only)
+- ✅ Create new classes with subject and grade (teachers only)
+- ✅ Manage student enrollments with checkbox interface
+- ✅ View enrolled student count per class
+- ✅ Organization-wide class visibility
 
 ### 👥 Students
 - ✅ View all students in organization
-- ✅ Add new students to classes
-- ✅ View student profiles
+- ✅ Create new student accounts (teachers only)
+- ✅ View detailed student information cards
+- ✅ Track attendance with percentage badges
+- ✅ Edit student information (teachers can edit any, students only their own)
+- ✅ Mark attendance (present/absent/late/excused)
+- ✅ View attendance history and statistics
+- ✅ Filter students by organization membership
 
 ### 📁 Resources
-- ✅ View all resources by class
-- ✅ Upload new resources (PDF, images, documents)
+- ✅ View all resources with category filters
+- ✅ Filter by: All, Assignments, Notes, Test Papers, Practice Questions, Other
+- ✅ Upload new resources with categories (teachers only)
+- ✅ Add assignments with due dates
 - ✅ Download resources
-- ✅ Delete resources
+- ✅ Delete resources (teachers only)
+- ✅ Scrollable filter chips for easy navigation
 
 ### 💬 Discussions
-- ✅ Organization discussions
+- ✅ Organization discussions (members only)
 - ✅ Global discussions (across all organizations)
-- ✅ Create new discussion threads
-- ✅ Reply to discussions
+- ✅ Create new discussion threads (teachers only)
+- ✅ Reply to discussions (all users)
 - ✅ View full discussion threads
+- ✅ Permission-based discussion creation
 
 ### 📅 Schedule
-- ✅ View class schedules
+- ✅ View class schedules (teachers only)
 - ✅ Create schedule events
 - ✅ Calendar view integration
+- ✅ Hidden from students for focused experience
 
 ### 🎨 UI/UX Features
 - ✅ Beautiful gradient theme matching web app
 - ✅ Side navigation drawer on all pages
 - ✅ Clickable dashboard statistics
 - ✅ Responsive design for all phone sizes
-- ✅ Image layering (banner + logo)
+- ✅ Image layering (banner + logo with perfect positioning)
 - ✅ Loading states and error handling
 - ✅ Bottom sheets for actions
 - ✅ Confirmation dialogs for destructive actions
+- ✅ Color-coded role badges (Owner/Admin/Teacher/Student)
+- ✅ Attendance percentage badges with color indicators
+- ✅ Scrollable filter chips for resource categories
+- ✅ Real-time enrollment management with checkboxes
+- ✅ Student info cards with detailed information
 
 ---
 
@@ -255,16 +285,20 @@ flutter/teacher/
 ```
 
 ### Database Schema
-- **users** - User accounts with profiles
-- **organizations** - Educational institutions
-- **organization_memberships** - User-organization relationships with roles
+- **users** - User accounts with profiles, photos, and grades
+- **organizations** - Educational institutions with logos and banners
+- **organization_memberships** - User-organization relationships with roles (owner/admin/teacher/student)
+- **organization_join_requests** - Pending join requests requiring approval
 - **subjects** - Subject catalog
-- **classes** - Class information
-- **class_enrollments** - Student enrollments
-- **resources** - Educational materials
+- **classes** - Class information with organization linkage
+- **class_students** - Student class enrollments
+- **attendance** - Daily attendance records with status tracking
+- **resources** - Educational materials with categories and due dates
 - **class_schedule** - Calendar events
-- **discussions** - Discussion threads
+- **discussions** - Discussion threads (organization and global)
 - **discussion_replies** - Discussion responses
+- **discussion_attachments** - File attachments for discussions
+- **reply_attachments** - File attachments for replies
 
 ---
 
@@ -282,31 +316,46 @@ flutter/teacher/
 ### Organizations
 - `GET /api/get_organizations` - List all organizations
 - `POST /api/create_organization` - Create new organization
-- `POST /api/join_organization/<id>` - Join organization
+- `POST /api/join_organization/<id>` - Request to join organization
 - `POST /api/update_organization` - Update organization (with logo/banner upload)
 - `GET /api/get_organization_members/<id>` - Get members list
 - `POST /api/update_member_role` - Change member role
 - `POST /api/remove_member` - Remove member
+- `GET /api/get_join_requests` - Get pending join requests
+- `POST /api/approve_join_request` - Approve join request
+- `POST /api/reject_join_request` - Reject join request
+- `GET /api/get_notification_count` - Get pending request count
 
 ### Classes
-- `GET /api/get_classes` - List classes
+- `GET /api/get_classes` - List classes (filtered by role)
 - `POST /api/create_class` - Create class
+- `POST /api/enroll_student` - Enroll student in class
+- `POST /api/unenroll_student` - Remove student from class
+- `GET /api/get_class_students/<id>` - Get enrolled students
+- `GET /api/get_student_classes/<id>` - Get student's classes
 
 ### Students
-- `GET /api/get_students` - List students
+- `GET /api/get_students` - List students (organization-filtered)
 - `POST /api/create_student` - Add student
+- `POST /api/update_student` - Update student information
+- `POST /api/mark_attendance` - Mark student attendance
+- `GET /api/get_attendance` - Get attendance records
+- `GET /api/get_attendance_percentage` - Get attendance statistics
 
 ### Resources
-- `GET /api/get_resources` - List resources
-- `POST /api/create_resource` - Upload resource
+- `GET /api/get_resources` - List resources (with category filter)
+- `POST /api/create_resource` - Upload resource with category
+- `DELETE /api/delete_resource/<id>` - Delete resource
 
 ### Discussions
 - `GET /api/get_discussions` - Organization discussions
 - `GET /api/get_global_discussions` - Global discussions
-- `POST /api/create_discussion` - Create discussion
+- `POST /api/create_discussion` - Create discussion (teachers only)
+- `POST /api/add_reply` - Add reply to discussion
+- `GET /api/get_discussion_details/<id>` - Get discussion with replies
 
 ### Schedule
-- `GET /api/get_schedule` - Get schedule
+- `GET /api/get_schedule` - Get schedule (teachers only)
 - `POST /api/create_schedule_event` - Create event
 
 ### Static Files
@@ -405,28 +454,33 @@ CMD ["python", "web_app.py"]
 ### Completed ✅
 - [x] Web application with full CRUD
 - [x] Mobile app with all core features
-- [x] Organization management system
-- [x] Role-based access control
+- [x] Organization management system with approval workflow
+- [x] Role-based access control (Owner/Admin/Teacher/Student)
 - [x] Profile and organization photo uploads
-- [x] Discussion forums
-- [x] Resource management
-- [x] Schedule system
+- [x] Discussion forums with permissions
+- [x] Resource management with categories
+- [x] Assignment system with due dates
+- [x] Attendance tracking system
+- [x] Class allocation and enrollment
+- [x] Schedule system (teacher-only)
 - [x] Remember Me functionality
-- [x] Offline demo mode
+- [x] Notification system for join requests
+- [x] Student permission restrictions
+- [x] Organization-filtered data access
 
 ### Upcoming 🚀
-- [ ] Real-time notifications
-- [ ] Push notifications for mobile
-- [ ] Dark mode
-- [ ] Attendance tracking
-- [ ] Gradebook system
+- [ ] Student categorization by grade
+- [ ] Gradebook system with marks
 - [ ] Advanced analytics dashboard
 - [ ] Export reports (PDF/Excel)
 - [ ] Email notifications
+- [ ] Push notifications for mobile
+- [ ] Dark mode
 - [ ] Calendar sync (Google Calendar)
 - [ ] Video conferencing integration
 - [ ] Advanced search and filters
 - [ ] Multi-language support
+- [ ] Parent portal access
 
 ---
 

@@ -268,10 +268,27 @@ class WebDatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 organization_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
-                role TEXT DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+                role TEXT DEFAULT 'teacher' CHECK (role IN ('owner', 'admin', 'teacher', 'student')),
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (organization_id) REFERENCES organizations (id),
                 FOREIGN KEY (user_id) REFERENCES users (id),
+                UNIQUE(organization_id, user_id)
+            )
+        """)
+        
+        # Organization join requests
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS organization_join_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by INTEGER,
+                FOREIGN KEY (organization_id) REFERENCES organizations (id),
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (reviewed_by) REFERENCES users (id),
                 UNIQUE(organization_id, user_id)
             )
         """)
@@ -343,6 +360,43 @@ class WebDatabaseManager:
             )
         """)
         
+        # Attendance table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                class_id INTEGER,
+                organization_id INTEGER,
+                date DATE NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'late', 'excused')),
+                marked_by INTEGER NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES users (id),
+                FOREIGN KEY (class_id) REFERENCES classes (id),
+                FOREIGN KEY (organization_id) REFERENCES organizations (id),
+                FOREIGN KEY (marked_by) REFERENCES users (id),
+                UNIQUE(student_id, date)
+            )
+        """)
+        
+        # Add resource_category column to resources if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE resources ADD COLUMN resource_category TEXT DEFAULT 'other'")
+        except:
+            pass
+        
+        try:
+            conn.execute("ALTER TABLE resources ADD COLUMN due_date DATE")
+        except:
+            pass
+        
+        # Migrate old is_homework to resource_category
+        try:
+            conn.execute("UPDATE resources SET resource_category = 'assignment' WHERE is_homework = 1")
+        except:
+            pass
+        
         conn.commit()
         
         # Create default admin user
@@ -350,6 +404,9 @@ class WebDatabaseManager:
         
         # Create default subjects
         self.create_default_subjects()
+        
+        # Create demo students
+        self.create_demo_students()
         
         conn.close()
     
@@ -413,6 +470,35 @@ class WebDatabaseManager:
             conn.commit()
         conn.close()
     
+    def create_demo_students(self):
+        """Create 10 demo student accounts for testing + 1 test student"""
+        conn = self.get_connection()
+        cursor = conn.execute("SELECT COUNT(*) FROM users WHERE user_type = 'student'")
+        if cursor.fetchone()[0] == 0:
+            students = [
+                ("student", "student@school.com", "Test", "Student", "student123"),  # Test account
+                ("student1", "student1@school.com", "Aarav", "Sharma", "student123"),
+                ("student2", "student2@school.com", "Vivaan", "Patel", "student123"),
+                ("student3", "student3@school.com", "Aditya", "Kumar", "student123"),
+                ("student4", "student4@school.com", "Vihaan", "Singh", "student123"),
+                ("student5", "student5@school.com", "Arjun", "Reddy", "student123"),
+                ("student6", "student6@school.com", "Sai", "Gupta", "student123"),
+                ("student7", "student7@school.com", "Arnav", "Verma", "student123"),
+                ("student8", "student8@school.com", "Ayaan", "Joshi", "student123"),
+                ("student9", "student9@school.com", "Krishna", "Nair", "student123"),
+                ("student10", "student10@school.com", "Ishaan", "Desai", "student123"),
+            ]
+            
+            for username, email, first_name, last_name, password in students:
+                password_hash = generate_password_hash(password)
+                conn.execute("""
+                    INSERT INTO users (username, email, password_hash, first_name, last_name, user_type)
+                    VALUES (?, ?, ?, ?, ?, 'student')
+                """, (username, email, password_hash, first_name, last_name))
+            
+            conn.commit()
+        conn.close()
+    
     def authenticate_user(self, username, password):
         """Authenticate user and return with organization context"""
         conn = self.get_connection()
@@ -457,9 +543,9 @@ class WebDatabaseManager:
                 """, (organization_id, user_id, user_type))
             
             conn.commit()
-            return True
+            return user_id
         except sqlite3.IntegrityError:
-            return False
+            return None
         finally:
             conn.close()
     
@@ -471,13 +557,23 @@ class WebDatabaseManager:
         conn.close()
         return subjects
     
-    def create_class(self, name, description, subject_id, grade_level, teacher_id):
+    def create_class(self, name, description, subject_id, grade_level, teacher_id, organization_id=None):
         """Create a new class"""
         conn = self.get_connection()
+        
+        # If organization_id not provided, get it from teacher's membership
+        if organization_id is None:
+            cursor = conn.execute("""
+                SELECT organization_id FROM organization_memberships 
+                WHERE user_id = ? LIMIT 1
+            """, (teacher_id,))
+            result = cursor.fetchone()
+            organization_id = result['organization_id'] if result else None
+        
         cursor = conn.execute("""
-            INSERT INTO classes (name, description, subject_id, grade_level, teacher_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, (name, description, subject_id, grade_level, teacher_id))
+            INSERT INTO classes (name, description, subject_id, grade_level, teacher_id, organization_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (name, description, subject_id, grade_level, teacher_id, organization_id))
         conn.commit()
         class_id = cursor.lastrowid
         conn.close()
@@ -755,17 +851,17 @@ class WebDatabaseManager:
         finally:
             conn.close()
 
-    def create_resource(self, title, description, resource_type, file_path=None, file_name=None, file_size=None, external_url=None, grade_level=None, subject_id=None, class_id=None, organization_id=None, uploaded_by=None, tags=None, is_public=True):
+    def create_resource(self, title, description, resource_type, file_path=None, file_name=None, file_size=None, external_url=None, grade_level=None, subject_id=None, class_id=None, organization_id=None, uploaded_by=None, tags=None, is_public=True, resource_category='other', due_date=None):
         """Create a new resource"""
         conn = self.get_connection()
         try:
             cursor = conn.execute("""
                 INSERT INTO resources 
                 (title, description, resource_type, file_path, file_name, file_size, external_url, 
-                 grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public, resource_category, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (title, description, resource_type, file_path, file_name, file_size, external_url,
-                  grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public))
+                  grade_level, subject_id, class_id, organization_id, uploaded_by, tags, is_public, resource_category, due_date))
             resource_id = cursor.lastrowid
             conn.commit()
             return resource_id
@@ -1045,10 +1141,20 @@ class WebDatabaseManager:
         conn.close()
         return cursor.rowcount > 0
     
-    def add_organization_member(self, organization_id, user_id, role='member'):
+    def add_organization_member(self, organization_id, user_id, role=None):
         """Add user to organization (enforces single organization per user)"""
         conn = self.get_connection()
         try:
+            # Get user type to determine default role if not specified
+            if role is None:
+                cursor = conn.execute("SELECT user_type FROM users WHERE id = ?", (user_id,))
+                user = cursor.fetchone()
+                if user:
+                    # Default role based on user type
+                    role = 'student' if user['user_type'] == 'student' else 'teacher'
+                else:
+                    role = 'teacher'
+            
             # Check if user is already a member of any organization
             cursor = conn.execute("""
                 SELECT organization_id FROM organization_memberships 
@@ -1077,6 +1183,132 @@ class WebDatabaseManager:
         finally:
             conn.close()
     
+    def create_join_request(self, organization_id, user_id):
+        """Create a join request for an organization"""
+        conn = self.get_connection()
+        try:
+            # First check if user already has a pending request or is already a member
+            cursor = conn.execute("""
+                SELECT id, status FROM organization_join_requests 
+                WHERE organization_id = ? AND user_id = ?
+            """, (organization_id, user_id))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # If rejected, update to pending again
+                if existing['status'] == 'rejected':
+                    conn.execute("""
+                        UPDATE organization_join_requests 
+                        SET status = 'pending', requested_at = CURRENT_TIMESTAMP 
+                        WHERE id = ?
+                    """, (existing['id'],))
+                    conn.commit()
+                    return True
+                else:
+                    # Already pending or approved
+                    return False
+            
+            # Check if already a member
+            cursor = conn.execute("""
+                SELECT id FROM organization_memberships 
+                WHERE organization_id = ? AND user_id = ?
+            """, (organization_id, user_id))
+            if cursor.fetchone():
+                return False
+            
+            # Create new join request
+            conn.execute("""
+                INSERT INTO organization_join_requests (organization_id, user_id, status)
+                VALUES (?, ?, 'pending')
+            """, (organization_id, user_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error creating join request: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+    
+    def get_pending_join_requests(self, organization_id):
+        """Get pending join requests for an organization"""
+        conn = self.get_connection()
+        cursor = conn.execute("""
+            SELECT jr.*, u.first_name, u.last_name, u.username, u.user_type, u.email
+            FROM organization_join_requests jr
+            JOIN users u ON jr.user_id = u.id
+            WHERE jr.organization_id = ? AND jr.status = 'pending'
+            ORDER BY jr.requested_at DESC
+        """, (organization_id,))
+        requests = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return requests
+    
+    def approve_join_request(self, request_id, reviewer_id):
+        """Approve a join request and add user to organization"""
+        conn = self.get_connection()
+        try:
+            # Get request details
+            cursor = conn.execute("""
+                SELECT organization_id, user_id FROM organization_join_requests
+                WHERE id = ? AND status = 'pending'
+            """, (request_id,))
+            request = cursor.fetchone()
+            
+            if not request:
+                return False
+            
+            org_id = request['organization_id']
+            user_id = request['user_id']
+            
+            # Get user type to determine role
+            cursor = conn.execute("SELECT user_type FROM users WHERE id = ?", (user_id,))
+            user = cursor.fetchone()
+            role = 'student' if user and user['user_type'] == 'student' else 'teacher'
+            
+            # Remove user from any existing organization
+            conn.execute("DELETE FROM organization_memberships WHERE user_id = ?", (user_id,))
+            
+            # Add user to new organization
+            conn.execute("""
+                INSERT INTO organization_memberships (organization_id, user_id, role)
+                VALUES (?, ?, ?)
+            """, (org_id, user_id, role))
+            
+            # Update request status
+            conn.execute("""
+                UPDATE organization_join_requests
+                SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+                WHERE id = ?
+            """, (reviewer_id, request_id))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error approving join request: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+    
+    def reject_join_request(self, request_id, reviewer_id):
+        """Reject a join request"""
+        conn = self.get_connection()
+        try:
+            conn.execute("""
+                UPDATE organization_join_requests
+                SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+                WHERE id = ? AND status = 'pending'
+            """, (reviewer_id, request_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error rejecting join request: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+    
     def get_organization_members(self, organization_id):
         """Get all members of an organization"""
         conn = self.get_connection()
@@ -1090,6 +1322,35 @@ class WebDatabaseManager:
         members = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return members
+    
+    def delete_organization_if_empty(self, organization_id):
+        """Delete organization if it has no members"""
+        conn = self.get_connection()
+        try:
+            # Check member count
+            cursor = conn.execute("""
+                SELECT COUNT(*) as count FROM organization_memberships
+                WHERE organization_id = ?
+            """, (organization_id,))
+            count = cursor.fetchone()['count']
+            
+            if count == 0:
+                # Delete organization and related data
+                conn.execute("DELETE FROM organization_join_requests WHERE organization_id = ?", (organization_id,))
+                conn.execute("DELETE FROM resources WHERE organization_id = ?", (organization_id,))
+                conn.execute("DELETE FROM discussions WHERE organization_id = ?", (organization_id,))
+                conn.execute("DELETE FROM classes WHERE organization_id = ?", (organization_id,))
+                conn.execute("DELETE FROM organizations WHERE id = ?", (organization_id,))
+                conn.commit()
+                print(f"Deleted empty organization {organization_id}")
+                return True
+            return False
+        except Exception as e:
+            print(f"Error deleting organization: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
     
     def get_user_organizations(self, user_id):
         """Get organization user is member of (single organization per user)"""
@@ -1113,6 +1374,21 @@ class WebDatabaseManager:
             SELECT o.*, om.role, om.joined_at
             FROM organizations o
             JOIN organization_memberships om ON o.id = om.organization_id
+            WHERE om.user_id = ?
+            ORDER BY om.joined_at DESC
+            LIMIT 1
+        """, (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return dict(result) if result else None
+    
+    def get_user_organization_membership(self, user_id):
+        """Get user's organization membership details"""
+        conn = self.get_connection()
+        cursor = conn.execute("""
+            SELECT om.*, o.name as org_name
+            FROM organization_memberships om
+            JOIN organizations o ON om.organization_id = o.id
             WHERE om.user_id = ?
             ORDER BY om.joined_at DESC
             LIMIT 1
@@ -1420,6 +1696,14 @@ def api_create_resource():
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
+    # Check if user is a student (students cannot create resources)
+    conn = db.get_connection()
+    user = conn.execute("SELECT user_type FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    conn.close()
+    
+    if user and user['user_type'] == 'student':
+        return jsonify({'error': 'Students cannot create resources'}), 403
+    
     try:
         # Handle form data with file upload
         if request.form:
@@ -1432,6 +1716,8 @@ def api_create_resource():
             external_url = request.form.get('external_url')
             tags = request.form.get('tags', '')
             is_public = request.form.get('is_public') == 'on'
+            resource_category = request.form.get('resource_category', 'other')
+            due_date = request.form.get('due_date')
             
             if not title or not resource_type:
                 return jsonify({'error': 'Title and resource type are required'}), 400
@@ -1469,7 +1755,9 @@ def api_create_resource():
                 organization_id=session.get('current_org_id'),
                 uploaded_by=session['user_id'],
                 tags=tags,
-                is_public=is_public
+                is_public=is_public,
+                resource_category=resource_category,
+                due_date=due_date
             )
             
             if resource_id:
@@ -1690,24 +1978,214 @@ def api_register():
 
 @app.route('/api/get_classes', methods=['GET'])
 def api_get_classes():
-    """Get classes for logged-in teacher"""
+    """Get classes for user's organization"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    if session['user_type'] != 'teacher':
-        return jsonify({'error': 'Only teachers can access classes'}), 403
+    # Get user's organization
+    org = db.get_user_current_organization(session['user_id'])
     
-    classes = db.get_teacher_classes(session['user_id'])
+    # If no organization, return empty list
+    if not org:
+        return jsonify({'success': True, 'classes': []})
+    
+    # Get all classes for the organization
+    conn = db.get_connection()
+    cursor = conn.execute("""
+        SELECT c.* FROM classes c
+        WHERE c.organization_id = ?
+        ORDER BY c.name
+    """, (org['id'],))
+    classes = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
     return jsonify({'success': True, 'classes': classes})
 
 @app.route('/api/get_students', methods=['GET'])
 def api_get_students():
-    """Get all students"""
+    """Get students from same organization"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    students = db.get_all_students()
+    # Get user's organization (only returns approved membership)
+    org = db.get_user_current_organization(session['user_id'])
+    
+    # If user has no approved organization, return empty list (don't show students)
+    if not org:
+        return jsonify({'success': True, 'students': []})
+    
+    conn = db.get_connection()
+    # Get students from same organization (including the requesting student if they are a student)
+    cursor = conn.execute("""
+        SELECT DISTINCT u.* 
+        FROM users u
+        JOIN organization_memberships om ON u.id = om.user_id
+        WHERE u.user_type = 'student' AND om.organization_id = ?
+        ORDER BY u.first_name, u.last_name
+    """, (org['id'],))
+    
+    students = [dict(row) for row in cursor.fetchall()]
+    conn.close()
     return jsonify({'success': True, 'students': students})
+
+@app.route('/api/update_student', methods=['POST'])
+def api_update_student():
+    """Update student information"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.json
+    student_id = data.get('student_id')
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    email = data.get('email')
+    phone_number = data.get('phone_number')
+    
+    if not student_id:
+        return jsonify({'success': False, 'error': 'Student ID required'}), 400
+    
+    conn = db.get_connection()
+    try:
+        # Check if current user is a student
+        user = conn.execute("SELECT user_type FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+        
+        # If user is a student, they can only update their own info
+        if user and user['user_type'] == 'student':
+            if int(student_id) != session['user_id']:
+                conn.close()
+                return jsonify({'success': False, 'error': 'Students can only update their own information'}), 403
+        
+        conn.execute("""
+            UPDATE users 
+            SET first_name = ?, last_name = ?, email = ?, phone_number = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_type = 'student'
+        """, (first_name, last_name, email, phone_number, student_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Student updated successfully'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mark_attendance', methods=['POST'])
+def api_mark_attendance():
+    """Mark attendance for a student"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Check if user is a student (students cannot mark attendance)
+    conn = db.get_connection()
+    user = conn.execute("SELECT user_type FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    
+    if user and user['user_type'] == 'student':
+        conn.close()
+        return jsonify({'error': 'Students cannot mark attendance'}), 403
+    
+    data = request.json
+    student_id = data.get('student_id')
+    status = data.get('status', 'present')
+    date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+    notes = data.get('notes', '')
+    
+    try:
+        # Check if attendance already exists for this student today
+        cursor = conn.execute("""
+            SELECT id FROM attendance 
+            WHERE student_id = ? AND date = ?
+        """, (student_id, date))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing attendance
+            conn.execute("""
+                UPDATE attendance 
+                SET status = ?, notes = ?, marked_by = ?
+                WHERE student_id = ? AND date = ?
+            """, (status, notes, session['user_id'], student_id, date))
+        else:
+            # Create new attendance record
+            conn.execute("""
+                INSERT INTO attendance (student_id, organization_id, date, status, marked_by, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (student_id, session.get('current_org_id'), date, status, session['user_id'], notes))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Attendance marked successfully'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/get_attendance', methods=['GET'])
+def api_get_attendance():
+    """Get attendance records"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+    student_id = request.args.get('student_id')
+    
+    conn = db.get_connection()
+    
+    if student_id:
+        # Get attendance for specific student
+        cursor = conn.execute("""
+            SELECT a.*, u.first_name, u.last_name 
+            FROM attendance a
+            JOIN users u ON a.student_id = u.id
+            WHERE a.student_id = ? AND a.date = ?
+        """, (student_id, date))
+    else:
+        # Get all attendance for date
+        cursor = conn.execute("""
+            SELECT a.*, u.first_name, u.last_name 
+            FROM attendance a
+            JOIN users u ON a.student_id = u.id
+            WHERE a.date = ?
+            ORDER BY u.first_name, u.last_name
+        """, (date,))
+    
+    attendance = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify({'success': True, 'attendance': attendance})
+
+@app.route('/api/get_attendance_percentage', methods=['GET'])
+def api_get_attendance_percentage():
+    """Get attendance percentage for all students"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    conn = db.get_connection()
+    try:
+        # Get attendance percentage for each student
+        cursor = conn.execute("""
+            SELECT 
+                u.id as student_id,
+                COUNT(CASE WHEN a.status = 'present' THEN 1 END) as present_count,
+                COUNT(a.id) as total_count,
+                ROUND(CAST(COUNT(CASE WHEN a.status = 'present' THEN 1 END) AS FLOAT) / 
+                      NULLIF(COUNT(a.id), 0) * 100, 1) as percentage
+            FROM users u
+            LEFT JOIN attendance a ON u.id = a.student_id
+            WHERE u.user_type = 'student'
+            GROUP BY u.id
+        """)
+        
+        percentages = {}
+        for row in cursor.fetchall():
+            percentages[row[0]] = {
+                'present_count': row[1] or 0,
+                'total_count': row[2] or 0,
+                'percentage': row[3] or 0.0
+            }
+        
+        conn.close()
+        return jsonify({'success': True, 'percentages': percentages})
+    except Exception as e:
+        conn.close()
+        print(f"Error getting attendance percentage: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/get_subjects', methods=['GET'])
 def api_get_subjects():
@@ -1735,16 +2213,77 @@ def api_get_organizations():
 
 @app.route('/api/get_resources', methods=['GET'])
 def api_get_resources():
-    """Get resources for current organization"""
+    """Get resources for current organization with optional homework filter"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    current_org_id = session.get('current_org_id')
-    if not current_org_id:
+    # Get user's actual approved organization (not session cache)
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
         return jsonify({'success': True, 'resources': []})
     
-    resources = db.get_resources_by_organization(current_org_id)
-    return jsonify({'success': True, 'resources': resources})
+    current_org_id = org['id']
+    
+    # Get filter parameters
+    category_filter = request.args.get('category', 'all')  # all, assignment, note, test_paper, practice, other
+    
+    conn = db.get_connection()
+    try:
+        # Check which columns exist
+        cursor = conn.execute("PRAGMA table_info(resources)")
+        columns = [row[1] for row in cursor.fetchall()]
+        has_category = 'resource_category' in columns
+        has_org_id = 'organization_id' in columns
+        has_subject_id = 'subject_id' in columns
+        has_uploaded_by = 'uploaded_by' in columns
+        
+        # Build query based on available columns
+        if has_subject_id and has_uploaded_by:
+            select_clause = "SELECT r.*, s.name as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN subjects s ON r.subject_id = s.id LEFT JOIN users u ON r.uploaded_by = u.id"
+        elif has_uploaded_by:
+            select_clause = "SELECT r.*, NULL as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN users u ON r.uploaded_by = u.id"
+        else:
+            select_clause = "SELECT r.*, NULL as subject_name, NULL as first_name, NULL as last_name FROM resources r"
+        
+        # Build WHERE conditions
+        conditions = []
+        params = []
+        
+        if has_org_id and current_org_id:
+            conditions.append("r.organization_id = ?")
+            params.append(current_org_id)
+        
+        if category_filter != 'all' and has_category:
+            conditions.append("r.resource_category = ?")
+            params.append(category_filter)
+        
+        # Build final query
+        if conditions:
+            query = f"{select_clause} WHERE {' AND '.join(conditions)} ORDER BY r.created_at DESC"
+            cursor = conn.execute(query, params)
+        else:
+            query = f"{select_clause} ORDER BY r.created_at DESC"
+            cursor = conn.execute(query)
+        
+        resources = [dict(row) for row in cursor.fetchall()]
+        
+        # Add default values for missing fields
+        for resource in resources:
+            if not has_category:
+                resource['resource_category'] = 'other'
+            if not has_org_id:
+                resource['organization_id'] = None
+            if not has_subject_id:
+                resource['subject_id'] = None
+            if not has_uploaded_by:
+                resource['uploaded_by'] = session.get('user_id')
+        
+        conn.close()
+        return jsonify({'success': True, 'resources': resources})
+    except Exception as e:
+        conn.close()
+        print(f"Error in get_resources: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/get_discussions', methods=['GET'])
 def api_get_discussions():
@@ -1752,11 +2291,12 @@ def api_get_discussions():
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    current_org_id = session.get('current_org_id')
-    if not current_org_id:
+    # Get user's actual approved organization (not session cache)
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
         return jsonify({'success': True, 'discussions': []})
     
-    discussions = db.get_discussions_by_organization(current_org_id)
+    discussions = db.get_discussions_by_organization(org['id'])
     return jsonify({'success': True, 'discussions': discussions})
 
 @app.route('/api/get_global_discussions', methods=['GET'])
@@ -1892,6 +2432,11 @@ def api_create_student():
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
+    # Get user's organization
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
+        return jsonify({'success': False, 'error': 'You must be in an organization to create students'}), 400
+    
     data = request.get_json() if request.is_json else request.form
     
     username = data.get('username')
@@ -1903,7 +2448,11 @@ def api_create_student():
     if not all([username, email, password, first_name, last_name]):
         return jsonify({'success': False, 'error': 'All fields required'}), 400
     
-    if db.create_user(username, email, password, first_name, last_name, 'student', session.get('current_org_id')):
+    # Create user
+    user_id = db.create_user(username, email, password, first_name, last_name, 'student')
+    if user_id:
+        # Add student to the organization
+        db.add_organization_member(org['id'], user_id, 'student')
         return jsonify({'success': True, 'message': 'Student created successfully'})
     else:
         return jsonify({'success': False, 'error': 'Username or email already exists'}), 400
@@ -1993,6 +2542,14 @@ def discussions():
 def api_create_discussion():
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Check if user is a student (students cannot create discussions)
+    conn = db.get_connection()
+    user = conn.execute("SELECT user_type FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    conn.close()
+    
+    if user and user['user_type'] == 'student':
+        return jsonify({'error': 'Students cannot create discussions. You can only reply to existing discussions.'}), 403
     
     # Handle form data with files
     if request.form:
@@ -2440,7 +2997,7 @@ def api_update_member_role():
     if not all([org_id, member_id, new_role]):
         return jsonify({'error': 'Missing required fields'}), 400
     
-    if new_role not in ['owner', 'admin', 'member']:
+    if new_role not in ['owner', 'admin', 'teacher', 'student']:
         return jsonify({'error': 'Invalid role'}), 400
     
     conn = db.get_connection()
@@ -2535,7 +3092,104 @@ def api_remove_member():
     conn.commit()
     conn.close()
     
+    # Check if organization is now empty and delete if so
+    db.delete_organization_if_empty(org_id)
+    
     return jsonify({'success': True, 'message': 'Member removed successfully'})
+
+@app.route('/api/get_notification_count', methods=['GET'])
+def api_get_notification_count():
+    """Get notification count for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    count = 0
+    
+    # Get user's organization and role
+    org = db.get_user_current_organization(session['user_id'])
+    if org:
+        membership = db.get_user_organization_membership(session['user_id'])
+        # Only owners and admins see join request notifications
+        if membership and membership['role'] in ['owner', 'admin']:
+            requests = db.get_pending_join_requests(org['id'])
+            count = len(requests) if requests else 0
+    
+    return jsonify({'success': True, 'count': count})
+
+@app.route('/api/get_join_requests', methods=['GET'])
+def api_get_join_requests():
+    """Get pending join requests for current organization (owner/admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Get user's organization
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
+        return jsonify({'error': 'Not in any organization'}), 400
+    
+    # Check if user is owner or admin
+    membership = db.get_user_organization_membership(session['user_id'])
+    if not membership or membership['role'] not in ['owner', 'admin']:
+        return jsonify({'error': 'Only owners and admins can view join requests'}), 403
+    
+    requests = db.get_pending_join_requests(org['id'])
+    return jsonify({'success': True, 'requests': requests})
+
+@app.route('/api/approve_join_request', methods=['POST'])
+def api_approve_join_request():
+    """Approve a join request (owner/admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() if request.is_json else request.form
+    request_id = data.get('request_id')
+    
+    if not request_id:
+        return jsonify({'error': 'Request ID required'}), 400
+    
+    # Get user's organization
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
+        return jsonify({'error': 'Not in any organization'}), 400
+    
+    # Check if user is owner or admin
+    membership = db.get_user_organization_membership(session['user_id'])
+    if not membership or membership['role'] not in ['owner', 'admin']:
+        return jsonify({'error': 'Only owners and admins can approve join requests'}), 403
+    
+    success = db.approve_join_request(request_id, session['user_id'])
+    if success:
+        return jsonify({'success': True, 'message': 'Join request approved'})
+    else:
+        return jsonify({'error': 'Failed to approve request'}), 500
+
+@app.route('/api/reject_join_request', methods=['POST'])
+def api_reject_join_request():
+    """Reject a join request (owner/admin only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json() if request.is_json else request.form
+    request_id = data.get('request_id')
+    
+    if not request_id:
+        return jsonify({'error': 'Request ID required'}), 400
+    
+    # Get user's organization
+    org = db.get_user_current_organization(session['user_id'])
+    if not org:
+        return jsonify({'error': 'Not in any organization'}), 400
+    
+    # Check if user is owner or admin
+    membership = db.get_user_organization_membership(session['user_id'])
+    if not membership or membership['role'] not in ['owner', 'admin']:
+        return jsonify({'error': 'Only owners and admins can reject join requests'}), 403
+    
+    success = db.reject_join_request(request_id, session['user_id'])
+    if success:
+        return jsonify({'success': True, 'message': 'Join request rejected'})
+    else:
+        return jsonify({'error': 'Failed to reject request'}), 500
 
 @app.route('/api/create_schedule_event', methods=['POST'])
 def api_create_schedule_event():
@@ -2581,44 +3235,40 @@ def api_create_schedule_event():
 
 @app.route('/api/join_organization/<int:org_id>', methods=['POST'])
 def api_join_organization(org_id):
-    """Join organization (switches from current organization if any)"""
+    """Request to join organization (requires admin approval)"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    # Check if user is already in an organization
-    current_org = db.get_user_current_organization(session['user_id'])
-    if current_org:
-        # User is switching organizations
-        success = db.add_organization_member(org_id, session['user_id'])
-        if success:
-            # Update session with new organization
-            new_org = db.get_organization_by_id(org_id)
-            session['current_org_id'] = org_id
-            session['current_org_name'] = new_org['name'] if new_org else 'Unknown Organization'
-            session['current_org_role'] = 'member'
-            return jsonify({
-                'success': True, 
-                'message': f'Successfully switched to {new_org["name"] if new_org else "the organization"}',
-                'switched': True
-            })
-        else:
-            return jsonify({'error': 'Failed to join organization'}), 500
+    # Check if already a member
+    if db.is_organization_member(org_id, session['user_id']):
+        return jsonify({'error': 'You are already a member of this organization'}), 400
+    
+    # Check for existing pending request
+    conn = db.get_connection()
+    cursor = conn.execute("""
+        SELECT status FROM organization_join_requests 
+        WHERE organization_id = ? AND user_id = ?
+    """, (org_id, session['user_id']))
+    existing = cursor.fetchone()
+    conn.close()
+    
+    if existing:
+        if existing['status'] == 'pending':
+            return jsonify({'error': 'You already have a pending request for this organization'}), 400
+        elif existing['status'] == 'approved':
+            return jsonify({'error': 'Your request was already approved'}), 400
+    
+    # Create join request
+    success = db.create_join_request(org_id, session['user_id'])
+    if success:
+        org = db.get_organization_by_id(org_id)
+        return jsonify({
+            'success': True, 
+            'message': f'Join request sent to {org["name"] if org else "the organization"}. Waiting for admin approval.',
+            'pending': True
+        })
     else:
-        # User is joining their first organization
-        success = db.add_organization_member(org_id, session['user_id'])
-        if success:
-            # Update session with new organization
-            new_org = db.get_organization_by_id(org_id)
-            session['current_org_id'] = org_id
-            session['current_org_name'] = new_org['name'] if new_org else 'Unknown Organization'
-            session['current_org_role'] = 'member'
-            return jsonify({
-                'success': True, 
-                'message': f'Successfully joined {new_org["name"] if new_org else "the organization"}',
-                'switched': False
-            })
-        else:
-            return jsonify({'error': 'Failed to join organization'}), 500
+        return jsonify({'error': 'Failed to create join request. Please try again.'}), 400
 
 @app.route('/api/get_discussion_details/<int:discussion_id>')
 def api_get_discussion_details(discussion_id):
@@ -2657,6 +3307,15 @@ def download_file(filename):
         return send_file(file_path, as_attachment=True)
     else:
         return "File not found", 404
+
+@app.route('/apk')
+def download_apk():
+    """Download the APK file - no auth required for easier distribution"""
+    apk_path = os.path.join(os.path.dirname(__file__), 'flutter/teacher/build/app/outputs/flutter-apk/app-release.apk')
+    if os.path.exists(apk_path):
+        return send_file(apk_path, as_attachment=True, download_name='staffroom.apk', mimetype='application/vnd.android.package-archive')
+    else:
+        return "APK not found. Please build the APK first.", 404
 
 def create_default_admin():
     """Create a default teacher user for testing"""

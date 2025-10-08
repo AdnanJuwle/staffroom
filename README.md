@@ -488,7 +488,9 @@ This project is open source and available for educational purposes.
 
 ## 👥 Authors
 
-- **Your Name** - Initial work and development
+- **Adnan Juwle** - Initial development, backend architecture, deployment, and core functionality
+- **Naveen Kalage** - Flutter mobile app design and UI/UX implementation
+- **Siddhant Khobaragade** - Cybersecurity, app security, and secure authentication implementation
 
 ---
 

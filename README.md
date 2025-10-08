@@ -507,7 +507,7 @@ This project is open source and available for educational purposes.
 
 For issues, questions, or suggestions:
 - Open an issue on GitHub
-- Contact: [your-email@example.com]
+- Contact: adnanjuwle1@gmail.com
 
 ---
 

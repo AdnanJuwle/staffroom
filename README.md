@@ -19,6 +19,8 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 ### ✨ Key Features
 
 - 🎯 **Organization Management** - Create and manage educational organizations with role-based access control
+- 🏷️ **Organization Tags** - Unique tags (@organizationname) for easy searching and identification
+- 🔍 **Organization Search** - Search organizations by name, tag, or description
 - 📚 **Class Management** - Organize classes by subject and grade (1st-12th)
 - 👥 **Student Management** - Track student enrollments, attendance, and progress
 - 📊 **Attendance System** - Mark and track student attendance with percentage calculations
@@ -32,6 +34,7 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 - 📅 **Schedule Management** - Class schedules and calendar events (teacher-only)
 - 👤 **Profile Management** - Customizable user profiles with photos
 - 🏢 **Organization Branding** - Custom logos and banners for organizations
+- 🌙 **Dark Mode** - Beautiful dark theme with persistent preference
 - 🔐 **Role-Based Access** - Owner, Admin, Teacher, and Student roles with granular permissions
 - 🔔 **Notification System** - Real-time notifications for join requests and approvals
 

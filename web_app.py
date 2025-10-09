@@ -384,6 +384,44 @@ class WebDatabaseManager:
             )
         """)
         
+        # Announcements table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS announcements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                organization_id INTEGER NOT NULL,
+                author_id INTEGER NOT NULL,
+                priority TEXT DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+                is_pinned BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE CASCADE,
+                FOREIGN KEY (author_id) REFERENCES users (id)
+            )
+        """)
+        
+        # Assignment submissions table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS assignment_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                assignment_id INTEGER NOT NULL,
+                student_id INTEGER NOT NULL,
+                file_path TEXT,
+                content TEXT,
+                submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                grade REAL,
+                feedback TEXT,
+                status TEXT DEFAULT 'submitted' CHECK (status IN ('submitted', 'graded', 'returned')),
+                graded_by INTEGER,
+                graded_at TIMESTAMP,
+                FOREIGN KEY (assignment_id) REFERENCES resources (id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES users (id),
+                FOREIGN KEY (graded_by) REFERENCES users (id),
+                UNIQUE(assignment_id, student_id)
+            )
+        """)
+        
         # Add resource_category column to resources if it doesn't exist
         try:
             conn.execute("ALTER TABLE resources ADD COLUMN resource_category TEXT DEFAULT 'other'")
@@ -914,9 +952,15 @@ class WebDatabaseManager:
             if 'organization_id' in columns and organization_id:
                 insert_cols.append('organization_id')
                 insert_vals.append(organization_id)
-            if 'uploaded_by' in columns and uploaded_by:
-                insert_cols.append('created_by')
-                insert_vals.append(uploaded_by)
+            # Map uploaded_by param to the actual column present in schema
+            # Prefer 'created_by' if it exists; fall back to 'uploaded_by' if present in older schemas
+            if uploaded_by is not None:
+                if 'created_by' in columns:
+                    insert_cols.append('created_by')
+                    insert_vals.append(uploaded_by)
+                elif 'uploaded_by' in columns:
+                    insert_cols.append('uploaded_by')
+                    insert_vals.append(uploaded_by)
             if 'resource_category' in columns and resource_category:
                 insert_cols.append('resource_category')
                 insert_vals.append(resource_category)
@@ -2309,6 +2353,8 @@ def api_get_resources():
         return jsonify({'success': True, 'resources': []})
     
     current_org_id = org['id']
+    user_type = session.get('user_type')
+    user_id = session['user_id']
     
     # Get filter parameters
     category_filter = request.args.get('category', 'all')  # all, assignment, note, test_paper, practice, other
@@ -2323,33 +2369,63 @@ def api_get_resources():
         has_subject_id = 'subject_id' in columns
         has_uploaded_by = 'uploaded_by' in columns
         
-        # Build query based on available columns
-        if has_subject_id and has_uploaded_by:
-            select_clause = "SELECT r.*, s.name as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN subjects s ON r.subject_id = s.id LEFT JOIN users u ON r.uploaded_by = u.id"
-        elif has_uploaded_by:
-            select_clause = "SELECT r.*, NULL as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN users u ON r.uploaded_by = u.id"
-        else:
-            select_clause = "SELECT r.*, NULL as subject_name, NULL as first_name, NULL as last_name FROM resources r"
-        
-        # Build WHERE conditions
-        conditions = []
-        params = []
-        
-        if has_org_id and current_org_id:
-            conditions.append("r.organization_id = ?")
-            params.append(current_org_id)
-        
-        if category_filter != 'all' and has_category:
-            conditions.append("r.resource_category = ?")
-            params.append(category_filter)
-        
-        # Build final query
-        if conditions:
+        # For students, filter by enrolled classes
+        if user_type == 'student':
+            # Get student's enrolled classes
+            enrolled_classes = db.get_student_classes(user_id)
+            enrolled_class_ids = [c['id'] for c in enrolled_classes]
+            
+            if not enrolled_class_ids:
+                # Student not enrolled in any classes
+                conn.close()
+                return jsonify({'success': True, 'resources': []})
+            
+            # Build query to only show resources from enrolled classes
+            if has_subject_id and has_uploaded_by:
+                select_clause = "SELECT r.*, s.name as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN subjects s ON r.subject_id = s.id LEFT JOIN users u ON r.uploaded_by = u.id"
+            elif has_uploaded_by:
+                select_clause = "SELECT r.*, NULL as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN users u ON r.uploaded_by = u.id"
+            else:
+                select_clause = "SELECT r.*, NULL as subject_name, NULL as first_name, NULL as last_name FROM resources r"
+            
+            # Build WHERE conditions
+            conditions = ["r.class_id IN ({})".format(','.join(['?' for _ in enrolled_class_ids]))]
+            params = enrolled_class_ids
+            
+            if category_filter != 'all' and has_category:
+                conditions.append("r.resource_category = ?")
+                params.append(category_filter)
+            
             query = f"{select_clause} WHERE {' AND '.join(conditions)} ORDER BY r.created_at DESC"
             cursor = conn.execute(query, params)
         else:
-            query = f"{select_clause} ORDER BY r.created_at DESC"
-            cursor = conn.execute(query)
+            # For teachers/admins, show all resources in organization
+            if has_subject_id and has_uploaded_by:
+                select_clause = "SELECT r.*, s.name as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN subjects s ON r.subject_id = s.id LEFT JOIN users u ON r.uploaded_by = u.id"
+            elif has_uploaded_by:
+                select_clause = "SELECT r.*, NULL as subject_name, u.first_name, u.last_name FROM resources r LEFT JOIN users u ON r.uploaded_by = u.id"
+            else:
+                select_clause = "SELECT r.*, NULL as subject_name, NULL as first_name, NULL as last_name FROM resources r"
+            
+            # Build WHERE conditions
+            conditions = []
+            params = []
+            
+            if has_org_id and current_org_id:
+                conditions.append("r.organization_id = ?")
+                params.append(current_org_id)
+            
+            if category_filter != 'all' and has_category:
+                conditions.append("r.resource_category = ?")
+                params.append(category_filter)
+            
+            # Build final query
+            if conditions:
+                query = f"{select_clause} WHERE {' AND '.join(conditions)} ORDER BY r.created_at DESC"
+                cursor = conn.execute(query, params)
+            else:
+                query = f"{select_clause} ORDER BY r.created_at DESC"
+                cursor = conn.execute(query)
         
         resources = [dict(row) for row in cursor.fetchall()]
         
@@ -3636,12 +3712,17 @@ def api_summarize_resource(resource_id):
         return jsonify({'error': 'Not authenticated'}), 401
     
     try:
-        # Get resource details
-        resources = db.get_all_resources()
-        resource = next((r for r in resources if r['id'] == resource_id), None)
+        # Get resource details from database
+        conn = db.get_connection()
+        cursor = conn.execute("SELECT * FROM resources WHERE id = ?", (resource_id,))
+        row = cursor.fetchone()
+        conn.close()
         
-        if not resource:
+        if not row:
             return jsonify({'error': 'Resource not found'}), 404
+        
+        # Convert row to dict
+        resource = dict(row)
         
         # Use description if available, otherwise create context from metadata
         if resource.get('description') and len(resource['description'].strip()) > 20:
@@ -3649,9 +3730,8 @@ def api_summarize_resource(resource_id):
         else:
             # Build description from available metadata
             content = f"This is a {resource.get('resource_category', resource.get('resource_type', 'resource'))} "
-            content += f"for grade {resource.get('grade_level', 'N/A')}. "
             if resource.get('title'):
-                content += f"Title: {resource['title']}."
+                content += f"titled '{resource['title']}'."
         
         # Generate overview
         summary = generate_ai_summary(content, "resource")
@@ -3665,6 +3745,341 @@ def api_summarize_resource(resource_id):
     
     except Exception as e:
         print(f"Error summarizing resource: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ========================================
+# ANNOUNCEMENTS API ENDPOINTS
+# ========================================
+
+@app.route('/api/get_announcements', methods=['GET'])
+def api_get_announcements():
+    """Get announcements for current organization"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    org_id = session.get('current_org_id')
+    if not org_id:
+        return jsonify({'error': 'No organization selected'}), 400
+    
+    try:
+        conn = db.get_connection()
+        cursor = conn.execute("""
+            SELECT a.*, u.first_name, u.last_name, u.user_type
+            FROM announcements a
+            JOIN users u ON a.author_id = u.id
+            WHERE a.organization_id = ?
+            ORDER BY a.is_pinned DESC, a.created_at DESC
+            LIMIT 10
+        """, (org_id,))
+        
+        announcements = []
+        for row in cursor.fetchall():
+            announcements.append({
+                'id': row[0],
+                'title': row[1],
+                'content': row[2],
+                'organization_id': row[3],
+                'author_id': row[4],
+                'priority': row[5],
+                'is_pinned': bool(row[6]),
+                'created_at': row[7],
+                'updated_at': row[8],
+                'author_first_name': row[9],
+                'author_last_name': row[10],
+                'author_type': row[11]
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'announcements': announcements})
+    
+    except Exception as e:
+        print(f"Error fetching announcements: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/create_announcement', methods=['POST'])
+def api_create_announcement():
+    """Create a new announcement (teachers/admins only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    user_type = session.get('user_type')
+    org_id = session.get('current_org_id')
+    
+    # Only teachers and admins can create announcements
+    if user_type not in ['teacher', 'admin']:
+        return jsonify({'error': 'Only teachers and admins can create announcements'}), 403
+    
+    if not org_id:
+        return jsonify({'error': 'No organization selected'}), 400
+    
+    data = request.get_json()
+    title = data.get('title', '').strip()
+    content = data.get('content', '').strip()
+    priority = data.get('priority', 'normal')
+    is_pinned = data.get('is_pinned', False)
+    
+    if not title or not content:
+        return jsonify({'error': 'Title and content are required'}), 400
+    
+    try:
+        conn = db.get_connection()
+        cursor = conn.execute("""
+            INSERT INTO announcements (title, content, organization_id, author_id, priority, is_pinned)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title, content, org_id, user_id, priority, is_pinned))
+        
+        announcement_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Announcement created successfully',
+            'announcement_id': announcement_id
+        })
+    
+    except Exception as e:
+        print(f"Error creating announcement: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/delete_announcement/<int:announcement_id>', methods=['DELETE'])
+def api_delete_announcement(announcement_id):
+    """Delete an announcement (only author or admin)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    user_type = session.get('user_type')
+    
+    try:
+        conn = db.get_connection()
+        
+        # Check if user is author or admin
+        cursor = conn.execute("SELECT author_id FROM announcements WHERE id = ?", (announcement_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Announcement not found'}), 404
+        
+        author_id = row[0]
+        
+        if user_id != author_id and user_type != 'admin':
+            conn.close()
+            return jsonify({'error': 'Permission denied'}), 403
+        
+        conn.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Announcement deleted'})
+    
+    except Exception as e:
+        print(f"Error deleting announcement: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ========================================
+# ASSIGNMENT SUBMISSIONS API ENDPOINTS
+# ========================================
+
+@app.route('/api/submit_assignment', methods=['POST'])
+def api_submit_assignment():
+    """Student submits an assignment"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    user_type = session.get('user_type')
+    
+    # Only students can submit assignments
+    if user_type != 'student':
+        return jsonify({'error': 'Only students can submit assignments'}), 403
+    
+    try:
+        assignment_id = request.form.get('assignment_id')
+        content = request.form.get('content', '').strip()
+        
+        if not assignment_id:
+            return jsonify({'error': 'Assignment ID is required'}), 400
+        
+        file_path = None
+        
+        # Handle file upload
+        if 'file' in request.files:
+            file = request.files['file']
+            if file.filename and file.filename != '':
+                filename = secure_filename(file.filename)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"submission_{user_id}_{timestamp}_{filename}"
+                
+                # Create submissions directory
+                submissions_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'submissions')
+                os.makedirs(submissions_dir, exist_ok=True)
+                
+                file_path = os.path.join(submissions_dir, unique_filename)
+                file.save(file_path)
+        
+        if not file_path and not content:
+            return jsonify({'error': 'Either file or content is required'}), 400
+        
+        conn = db.get_connection()
+        
+        # Check if submission already exists
+        cursor = conn.execute("""
+            SELECT id FROM assignment_submissions
+            WHERE assignment_id = ? AND student_id = ?
+        """, (assignment_id, user_id))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing submission
+            conn.execute("""
+                UPDATE assignment_submissions
+                SET file_path = ?, content = ?, submission_date = CURRENT_TIMESTAMP, status = 'submitted'
+                WHERE assignment_id = ? AND student_id = ?
+            """, (file_path, content, assignment_id, user_id))
+        else:
+            # Create new submission
+            conn.execute("""
+                INSERT INTO assignment_submissions (assignment_id, student_id, file_path, content)
+                VALUES (?, ?, ?, ?)
+            """, (assignment_id, user_id, file_path, content))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Assignment submitted successfully'
+        })
+    
+    except Exception as e:
+        print(f"Error submitting assignment: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get_assignment_submissions/<int:assignment_id>', methods=['GET'])
+def api_get_assignment_submissions(assignment_id):
+    """Get all submissions for an assignment (teachers only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_type = session.get('user_type')
+    
+    # Only teachers and admins can view all submissions
+    if user_type not in ['teacher', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    try:
+        conn = db.get_connection()
+        cursor = conn.execute("""
+            SELECT s.*, u.first_name, u.last_name, u.email
+            FROM assignment_submissions s
+            JOIN users u ON s.student_id = u.id
+            WHERE s.assignment_id = ?
+            ORDER BY s.submission_date DESC
+        """, (assignment_id,))
+        
+        submissions = []
+        for row in cursor.fetchall():
+            submissions.append({
+                'id': row[0],
+                'assignment_id': row[1],
+                'student_id': row[2],
+                'file_path': row[3],
+                'content': row[4],
+                'submission_date': row[5],
+                'grade': row[6],
+                'feedback': row[7],
+                'status': row[8],
+                'graded_by': row[9],
+                'graded_at': row[10],
+                'student_first_name': row[11],
+                'student_last_name': row[12],
+                'student_email': row[13]
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'submissions': submissions})
+    
+    except Exception as e:
+        print(f"Error fetching submissions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get_my_submission/<int:assignment_id>', methods=['GET'])
+def api_get_my_submission(assignment_id):
+    """Get student's own submission for an assignment"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    
+    try:
+        conn = db.get_connection()
+        cursor = conn.execute("""
+            SELECT * FROM assignment_submissions
+            WHERE assignment_id = ? AND student_id = ?
+        """, (assignment_id, user_id))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({'success': True, 'submission': None})
+        
+        submission = {
+            'id': row[0],
+            'assignment_id': row[1],
+            'student_id': row[2],
+            'file_path': row[3],
+            'content': row[4],
+            'submission_date': row[5],
+            'grade': row[6],
+            'feedback': row[7],
+            'status': row[8],
+            'graded_by': row[9],
+            'graded_at': row[10]
+        }
+        
+        return jsonify({'success': True, 'submission': submission})
+    
+    except Exception as e:
+        print(f"Error fetching submission: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/grade_submission/<int:submission_id>', methods=['POST'])
+def api_grade_submission(submission_id):
+    """Grade a student's submission (teachers only)"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    user_type = session.get('user_type')
+    
+    # Only teachers and admins can grade
+    if user_type not in ['teacher', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    data = request.get_json()
+    grade = data.get('grade')
+    feedback = data.get('feedback', '')
+    
+    try:
+        conn = db.get_connection()
+        conn.execute("""
+            UPDATE assignment_submissions
+            SET grade = ?, feedback = ?, status = 'graded', graded_by = ?, graded_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (grade, feedback, user_id, submission_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Submission graded successfully'})
+    
+    except Exception as e:
+        print(f"Error grading submission: {e}")
         return jsonify({'error': str(e)}), 500
 
 def create_default_admin():

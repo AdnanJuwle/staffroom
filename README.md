@@ -24,7 +24,10 @@ StaffRoom is a modern, full-featured educational management platform designed fo
 - 📊 **Attendance System** - Mark and track student attendance with percentage calculations
 - 📝 **Assignment System** - Create and manage assignments with due dates and categories
 - 🎓 **Class Allocation** - Enroll students in specific classes with easy management
+- 📢 **Announcements** - Create priority-based announcements (low, normal, high, urgent) with pinning support
+- 📤 **Assignment Submissions** - Students can submit assignments with files/notes, teachers can grade and provide feedback
 - 💬 **Discussion Forums** - Organization-wide and global discussions with reply system
+- 🤖 **AI Summarization** - AI-powered content summarization for resources and discussions
 - 📁 **Resource Library** - Upload and categorize educational materials (assignments, notes, test papers, practice questions)
 - 📅 **Schedule Management** - Class schedules and calendar events (teacher-only)
 - 👤 **Profile Management** - Customizable user profiles with photos

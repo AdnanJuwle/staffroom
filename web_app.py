@@ -266,6 +266,12 @@ class WebDatabaseManager:
         except:
             pass
         
+        # Add organization_tag column (unique identifier for search)
+        try:
+            conn.execute("ALTER TABLE organizations ADD COLUMN organization_tag TEXT UNIQUE")
+        except:
+            pass
+        
         # Organization memberships
         conn.execute("""
             CREATE TABLE IF NOT EXISTS organization_memberships (
@@ -1190,15 +1196,28 @@ class WebDatabaseManager:
         finally:
             conn.close()
 
-    def create_organization(self, name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public=True, discussion_privacy='public'):
+    def create_organization(self, name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public=True, discussion_privacy='public', organization_tag=None):
         """Create a new organization"""
         conn = self.get_connection()
         try:
-            cursor = conn.execute("""
-                INSERT INTO organizations 
-                (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy))
+            # Check if organization_tag column exists
+            cursor = conn.execute("PRAGMA table_info(organizations)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_tag = 'organization_tag' in columns
+            
+            if has_tag and organization_tag:
+                cursor = conn.execute("""
+                    INSERT INTO organizations 
+                    (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy, organization_tag)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy, organization_tag))
+            else:
+                cursor = conn.execute("""
+                    INSERT INTO organizations 
+                    (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, description, about, location, contact_email, contact_phone, website, logo_filename, logo_path, created_by, is_public, discussion_privacy))
+            
             org_id = cursor.lastrowid
             conn.commit()
             return org_id
@@ -2328,18 +2347,39 @@ def api_get_subjects():
 
 @app.route('/api/get_organizations', methods=['GET'])
 def api_get_organizations():
-    """Get all organizations"""
+    """Get all organizations with optional search"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    organizations = db.get_all_organizations()
-    user_orgs = db.get_user_organizations(session['user_id'])
+    search_query = request.args.get('search', '').strip()
     
-    return jsonify({
-        'success': True,
-        'organizations': organizations,
-        'user_organizations': user_orgs
-    })
+    conn = db.get_connection()
+    try:
+        if search_query:
+            # Search by name, tag, or description
+            cursor = conn.execute("""
+                SELECT * FROM organizations 
+                WHERE name LIKE ? 
+                   OR organization_tag LIKE ?
+                   OR description LIKE ?
+                ORDER BY name
+            """, (f'%{search_query}%', f'%{search_query}%', f'%{search_query}%'))
+            organizations = [dict(row) for row in cursor.fetchall()]
+        else:
+            organizations = db.get_all_organizations()
+        
+        user_orgs = db.get_user_organizations(session['user_id'])
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'organizations': organizations,
+            'user_organizations': user_orgs
+        })
+    except Exception as e:
+        conn.close()
+        print(f"Error fetching organizations: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/get_resources', methods=['GET'])
 def api_get_resources():
@@ -2963,17 +3003,34 @@ def api_create_organization():
         website = data.get('website', '')
         is_public = data.get('is_public', True)
         discussion_privacy = data.get('discussion_privacy', 'public')
+        organization_tag = data.get('organization_tag', '').strip()
         logo_filename = None
         logo_path = None
         
         if not name:
             return jsonify({'error': 'Organization name is required'}), 400
         
+        # Generate a unique tag if not provided
+        if not organization_tag:
+            import re
+            base_tag = re.sub(r'[^a-z0-9]', '', name.lower())[:20]
+            organization_tag = base_tag
+            # Ensure uniqueness
+            conn = db.get_connection()
+            counter = 1
+            while True:
+                cursor = conn.execute("SELECT id FROM organizations WHERE organization_tag = ?", (organization_tag,))
+                if not cursor.fetchone():
+                    break
+                organization_tag = f"{base_tag}{counter}"
+                counter += 1
+            conn.close()
+        
         try:
             org_id = db.create_organization(
                 name, description, about, location, contact_email, 
                 contact_phone, website, logo_filename, logo_path, 
-                session['user_id'], is_public, discussion_privacy
+                session['user_id'], is_public, discussion_privacy, organization_tag
             )
             
             if org_id and org_id > 0:
